@@ -11,8 +11,9 @@ namespace Duel
 {
     public class UnityGameServicesManager : IndestructibleSingletonBehaviour<UnityGameServicesManager>
     {
-        private const string ModuleName = "Duel";
-
+        public string moduleName = "Duel";
+        public ReflexGameUGS ReflexGameUgs { get; set; }
+        
         void Start()
         {
             InitializeServicesAsync().ConfigureAwait(false);
@@ -31,68 +32,41 @@ namespace Duel
                 Debug.LogError($"Failed to initialize Unity Services: {ex.Message}");
             }
         }
-
-        public async Task<HostGameResponse> HostDuelGame()
+        
+        public async Task<JoinGlobalLobbyResponse> JoinGlobalLobby(string username)
         {
-            Debug.Log($"Attempting to call {ModuleName}/HostDuelGame via CallModuleEndpointAsync...");
+            Debug.Log($"Attempting to call {moduleName}/JoinGlobalLobby with username: {username}");
             try
             {
-                var result = await CloudCodeService.Instance.CallModuleEndpointAsync<HostGameResponse>(
-                    ModuleName,
-                    "HostDuelGame"
+                var result = await CloudCodeService.Instance.CallModuleEndpointAsync<JoinGlobalLobbyResponse>(
+                    moduleName,
+                    "JoinGlobalLobby",
+                    new Dictionary<string, object> { { "username", username } }
                 );
-                Debug.Log($"Hosted game with lobby code: {result.lobbyCode}");
+                Debug.Log($"Joined global lobby: {result.LobbyName} with {result.PlayerCount} players");
                 return result;
             }
             catch (CloudCodeException e)
             {
-                Debug.LogError($"Failed to host game (CloudCodeException): {e.Message} | Error Code: {e.ErrorCode} | Reason: {e.Reason}");
+                Debug.LogError($"Failed to join global lobby (CloudCodeException): {e.Message} | Error Code: {e.ErrorCode} | Reason: {e.Reason}");
                 Debug.LogError($"Details: {e.ToString()}");
                 return null;
             }
             catch (Exception e)
             {
-                Debug.LogError($"Failed to host game (System.Exception): {e.Message}");
+                Debug.LogError($"Failed to join global lobby (System.Exception): {e.Message}");
                 Debug.LogError($"Details: {e.ToString()}");
                 return null;
             }
         }
-
-        public async Task<JoinGameResponse> JoinDuelGame(string lobbyCode)
-        {
-            Debug.Log($"Attempting to call {ModuleName}/JoinDuelGame...");
-            try
-            {
-                // Updated to pass lobbyCode as parameter instead of dictionary
-                var result = await CloudCodeService.Instance.CallModuleEndpointAsync<JoinGameResponse>(
-                    ModuleName,
-                    "JoinDuelGame",
-                    new Dictionary<string, object> { { "lobbyCode", lobbyCode } }
-                );
-                Debug.Log($"Joined game: {result.session}");
-                return result;
-            }
-            catch (CloudCodeException e)
-            {
-                Debug.LogError($"Failed to join game (CloudCodeException): {e.Message} | Error Code: {e.ErrorCode} | Reason: {e.Reason}");
-                Debug.LogError($"Details: {e.ToString()}");
-                return null;
-            }
-            catch (System.Exception e)
-            {
-                Debug.LogError($"Failed to join game (System.Exception): {e.Message}");
-                Debug.LogError($"Details: {e.ToString()}");
-                return null;
-            }
-        }
-
+        
         public async Task<HostGameResponse> HostLobby()
         {
-            Debug.Log($"Attempting to call {ModuleName}/HostLobby...");
+            Debug.Log($"Attempting to call {moduleName}/HostLobby...");
             try
             {
                 var result = await CloudCodeService.Instance.CallModuleEndpointAsync<HostGameResponse>(
-                    ModuleName,
+                    moduleName,
                     "HostLobby"
                 );
                 Debug.Log($"Hosted real Unity lobby with code: {result.lobbyCode}");
@@ -114,12 +88,11 @@ namespace Duel
 
         public async Task<JoinGameResponse> JoinLobby(string lobbyCode)
         {
-            Debug.Log($"Attempting to call {ModuleName}/JoinLobby...");
+            Debug.Log($"Attempting to call {moduleName}/JoinLobby...");
             try
             {
-                // Updated to pass lobbyCode as parameter instead of dictionary
                 var result = await CloudCodeService.Instance.CallModuleEndpointAsync<JoinGameResponse>(
-                    ModuleName,
+                    moduleName,
                     "JoinLobby",
                     new Dictionary<string, object> { { "lobbyCode", lobbyCode } }
                 );
@@ -140,70 +113,13 @@ namespace Duel
             }
         }
 
-        public async Task<ResultResponse> SubmitReflexTime(string session, int reactionTimeMs)
+        [Serializable]
+        public class JoinGlobalLobbyResponse
         {
-            Debug.Log($"Attempting to call {ModuleName}/SubmitReflexTime...");
-            try
-            {
-                var parameters = new Dictionary<string, object>
-                {
-                    { "session", session },
-                    { "reactionTimeMs", reactionTimeMs }
-                };
-                var result = await CloudCodeService.Instance.CallModuleEndpointAsync<ResultResponse>(
-                    ModuleName,
-                    "SubmitReflexTime",
-                    parameters
-                );
-                Debug.Log($"Submitted time: {reactionTimeMs}ms");
-                return result;
-            }
-            catch (CloudCodeException e)
-            {
-                Debug.LogError($"Failed to submit time (CloudCodeException): {e.Message} | Error Code: {e.ErrorCode} | Reason: {e.Reason}");
-                Debug.LogError($"Details: {e.ToString()}");
-                return null;
-            }
-            catch (System.Exception e)
-            {
-                Debug.LogError($"Failed to submit time (System.Exception): {e.Message}");
-                Debug.LogError($"Details: {e.ToString()}");
-                return null;
-            }
-        }
-
-        public async Task<ResultResponse> SubmitReflexResult(string sessionId, int reactionTimeMs)
-        {
-            Debug.Log($"Attempting to call {ModuleName}/SubmitReflexResult...");
-            try
-            {
-                var parameters = new Dictionary<string, object>
-                {
-                    { "sessionId", sessionId },
-                    { "reactionTimeMs", reactionTimeMs }
-                };
-        
-                var result = await CloudCodeService.Instance.CallModuleEndpointAsync<ResultResponse>(
-                    ModuleName,
-                    "SubmitReflexResult",
-                    parameters
-                );
-        
-                Debug.Log($"Submitted reflex result - Time: {reactionTimeMs}ms, Winner: {result.winner}");
-                return result;
-            }
-            catch (CloudCodeException e)
-            {
-                Debug.LogError($"Failed to submit reflex result (CloudCodeException): {e.Message} | Error Code: {e.ErrorCode} | Reason: {e.Reason}");
-                Debug.LogError($"Details: {e.ToString()}");
-                return null;
-            }
-            catch (System.Exception e)
-            {
-                Debug.LogError($"Failed to submit reflex result (System.Exception): {e.Message}");
-                Debug.LogError($"Details: {e.ToString()}");
-                return null;
-            }
+            public string LobbyId;
+            public string LobbyName;
+            public int PlayerCount;
+            public bool Success;
         }
 
         [Serializable]
@@ -217,15 +133,6 @@ namespace Duel
         {
             public string session;
             public string opponentId;
-        }
-
-        [Serializable]
-        public class ResultResponse
-        {
-            public string winner;
-            public int yourTime;
-            public int opponentTime;
-            public bool gameOver;
         }
     }
 }

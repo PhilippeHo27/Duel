@@ -13,6 +13,17 @@ namespace Unity.Services.CloudCode.GeneratedBindings
             k_Service = service;
         }
 
+        public async Task<Duel.JoinGlobalLobbyResponse> JoinGlobalLobby(string username)
+        {
+            return await k_Service.CallModuleEndpointAsync<Duel.JoinGlobalLobbyResponse>(
+                "Duel",
+                "JoinGlobalLobby",
+                new Dictionary<string, object>()
+                {
+                    {"username", username},
+                });
+        }
+
         public async Task<Duel.HostGameResponse> HostLobby()
         {
             return await k_Service.CallModuleEndpointAsync<Duel.HostGameResponse>(

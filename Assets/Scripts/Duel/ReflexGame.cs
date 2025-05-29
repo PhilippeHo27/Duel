@@ -1,181 +1,154 @@
 using UnityEngine;
 using UnityEngine.UI;
+using UnityEngine.EventSystems;
 using System.Collections;
-using System.Threading.Tasks;
 using TMPro;
 
 namespace Duel
 {
-    public class ReflexGame : MonoBehaviour
+    public class ReflexGame : MonoBehaviour, IPointerClickHandler
     {
         [Header("UI Elements")]
-        public Image gameImage;
-        public Button startButton;
-        public TMP_Text instructionText;
-        public TMP_Text resultText;
-        public TMP_Text declareWinnerText;
+        [SerializeField] private Image gameImage;
+        [SerializeField] private TMP_Text instructionText;
+        [SerializeField] private TMP_Text declareWinnerText;
         
         [Header("Game Settings")]
-        public Color waitColor = Color.red;
-        public Color clickColor = Color.green;
-        public float minWaitTime = 2f;
-        public float maxWaitTime = 5f;
-        
-        private bool gameActive = false;
-        private bool waitingForClick = false;
-        private float gameStartTime;
-        private int lastReactionTimeMs = 0;
+        [SerializeField] private float minWaitTime = 2f;
+        [SerializeField] private float maxWaitTime = 5f;
+
+        private readonly Color _waitColor = new Color32(0xFF, 0x5E, 0x5E, 0xFF);
+        private readonly Color _clickColor = new Color32(0x01, 0xFF, 0x76, 0xFF);
+        private Color _defaultBackground = new Color32(0xB9, 0xCF, 0xC4, 0xFF);
+
+        private const string InitialText = "Click anywhere to start";
+        private const string WaitText = "Wait for change...";
+        private const string ClickNowText = "CLICK NOW!";
+        private const string TooSoonText = "Too soon! Click to try again";
+        private const string ResultText = "Reaction: {0}ms - Click to try again";
+
+        private bool _gameActive;
+        private bool _waitingForClick;
+        private float _gameStartTime;
+        private bool _gameStarted;
+
+        private ReflexGameUGS _reflexGameUgs;
         
         void Start()
         {
+            _reflexGameUgs = new ReflexGameUGS(UnityGameServicesManager.Instance);
+            if (gameImage != null) _defaultBackground = gameImage.color;
             SetupInitialState();
-            
-            // Add listeners
-            if (startButton != null)
-                startButton.onClick.AddListener(() => StartGameAsync().ConfigureAwait(false));
-                
-            if (gameImage != null)
-                gameImage.GetComponent<Button>().onClick.AddListener(OnImageClicked);
         }
         
         private void SetupInitialState()
         {
             if (gameImage != null)
+                gameImage.color = _defaultBackground;
+                
+            if (instructionText != null)
+                instructionText.text = InitialText;
+                
+            _gameStarted = false;
+        }
+        
+        public void OnPointerClick(PointerEventData eventData)
+        {
+            if (eventData.pointerCurrentRaycast.gameObject != gameImage.gameObject) 
+                return;
+
+            if (!_gameStarted)
             {
-                gameImage.color = waitColor;
-                // Make sure the image has a Button component
-                if (gameImage.GetComponent<Button>() == null)
-                {
-                    gameImage.gameObject.AddComponent<Button>();
-                }
+                StartGame();
+                return;
             }
             
-            if (instructionText != null)
-                instructionText.text = "Click 'Start Game' to begin!";
-                
-            if (resultText != null)
-                resultText.text = "";
-        }
-        
-        private async Task StartGameAsync()
-        {
-            if (gameActive) return;
-            
-            gameActive = true;
-            waitingForClick = false;
-            
-            // Reset UI
-            if (gameImage != null)
-                gameImage.color = waitColor;
-                
-            if (instructionText != null)
-                instructionText.text = "Wait for GREEN... Don't click yet!";
-                
-            if (resultText != null)
-                resultText.text = "";
-                
-            if (startButton != null)
-                startButton.interactable = false;
-            
-            // Wait random time before turning green
-            float waitTime = Random.Range(minWaitTime, maxWaitTime);
-            await Task.Delay((int)(waitTime * 1000));
-            
-            // Check if game is still active (user might have clicked early)
-            if (!gameActive) return;
-            
-            // Turn green and start timing
-            if (gameImage != null)
-                gameImage.color = clickColor;
-                
-            if (instructionText != null)
-                instructionText.text = "CLICK NOW!";
-                
-            waitingForClick = true;
-            gameStartTime = Time.realtimeSinceStartup;
-        }
-        
-        private void OnImageClicked()
-        {
-            if (!gameActive) return;
-            
-            if (!waitingForClick)
+            if (!_gameActive)
             {
-                // Clicked too early
+                StartGame();
+                return;
+            }
+            
+            if (!_waitingForClick)
+            {
                 EndGame(false, 0);
                 return;
             }
             
-            // Calculate reaction time
-            float reactionTime = Time.realtimeSinceStartup - gameStartTime;
+            float reactionTime = Time.realtimeSinceStartup - _gameStartTime;
             int reactionTimeMs = Mathf.RoundToInt(reactionTime * 1000);
-            
             EndGame(true, reactionTimeMs);
         }
         
-        private async void EndGame(bool success, int reactionTimeMs)
+        private void StartGame()
         {
-            gameActive = false;
-            waitingForClick = false;
-            lastReactionTimeMs = reactionTimeMs;
+            if (_gameActive) return;
+            
+            _gameStarted = true;
+            StartCoroutine(GameSequence());
+        }
+        
+        private IEnumerator GameSequence()
+        {
+            _gameActive = true;
+            _waitingForClick = false;
+            
+            if (gameImage != null)
+                gameImage.color = _waitColor;
+                
+            if (instructionText != null)
+                instructionText.text = WaitText;
+            
+            float waitTime = Random.Range(minWaitTime, maxWaitTime);
+            yield return new WaitForSeconds(waitTime);
+            
+            if (!_gameActive) yield break;
+            
+            if (gameImage != null)
+                gameImage.color = _clickColor;
+                
+            if (instructionText != null)
+                instructionText.text = ClickNowText;
+                
+            _waitingForClick = true;
+            _gameStartTime = Time.realtimeSinceStartup;
+        }
+        
+        private void EndGame(bool success, int reactionTimeMs)
+        {
+            _gameActive = false;
+            _waitingForClick = false;
     
-            if (startButton != null)
-                startButton.interactable = true;
-    
+            if (gameImage != null)
+                gameImage.color = _defaultBackground;
+
             if (success)
             {
                 if (instructionText != null)
-                    instructionText.text = "Great job! Submitting result...";
-            
-                if (resultText != null)
-                    resultText.text = $"Reaction Time: {reactionTimeMs}ms";
-        
-                // Submit result to server (singleton call)
-                var result = await UnityGameServicesManager.Instance.SubmitReflexResult(DataManager.Instance.lobbyName, reactionTimeMs);
-                declareWinnerText.text = result.winner;
-                Debug.Log($"Reaction time: {reactionTimeMs}ms");
+                    instructionText.text = string.Format(ResultText, reactionTimeMs);
+    
+                SubmitResultAsync(reactionTimeMs);
             }
             else
             {
                 if (instructionText != null)
-                    instructionText.text = "Too early! Wait for GREEN next time.";
-            
-                if (resultText != null)
-                    resultText.text = "False start!";
-            
-                Debug.Log("False start - clicked too early!");
+                    instructionText.text = TooSoonText;
             }
-    
-            // Reset image color
-            if (gameImage != null)
-                gameImage.color = waitColor;
         }
 
-        
-        /// <summary>
-        /// Returns the last recorded reaction time in milliseconds
-        /// Returns 0 if no valid reaction time has been recorded
-        /// </summary>
-        public int GetLastReactionTimeMs()
+        private async void SubmitResultAsync(int reactionTimeMs)
         {
-            return lastReactionTimeMs;
+            try
+            {
+                var result = await _reflexGameUgs.SubmitReflexResult(DataManager.Instance.lobbyName, reactionTimeMs);
+                if (declareWinnerText != null)
+                     declareWinnerText.text = result.winner;
+            }
+            catch (System.Exception ex)
+            {
+                Debug.LogError($"Failed to submit result: {ex.Message}");
+            }
         }
-        
-        /// <summary>
-        /// Returns true if a game is currently in progress
-        /// </summary>
-        public bool IsGameActive()
-        {
-            return gameActive;
-        }
-        
-        void OnDestroy()
-        {
-            if (startButton != null)
-                startButton.onClick.RemoveAllListeners();
-                
-            if (gameImage != null && gameImage.GetComponent<Button>() != null)
-                gameImage.GetComponent<Button>().onClick.RemoveAllListeners();
-        }
+
     }
 }

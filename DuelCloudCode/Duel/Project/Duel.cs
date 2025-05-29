@@ -10,10 +10,104 @@ namespace Duel;
 
 public class Duel
 {
-    // No constructor, no injection - just simple functions
-    public Duel()
+    private readonly IGameApiClient _gameApiClient;
+    
+    [CloudCodeFunction("JoinGlobalLobby")]
+    public async Task<JoinGlobalLobbyResponse> JoinGlobalLobby(IExecutionContext context, string username)    
     {
+        var gameApiClient = GameApiClient.Create();
+        
+        await UpdatePlayerUsername(context, username);
+        
+        // Create player with username data
+        var playerWithUsername = new Player(
+            id: context.PlayerId!,
+            data: new Dictionary<string, PlayerDataObject>
+            {
+                { "username", new PlayerDataObject(
+                    value: username,
+                    visibility: PlayerDataObject.VisibilityEnum.Member
+                )}
+            }
+        );
+
+        var queryResponse = await gameApiClient.Lobby.QueryLobbiesAsync(
+            context,
+            context.AccessToken,
+            queryRequest: new QueryRequest
+            {
+                Filter = new List<QueryFilter>
+                {
+                    new (
+                        field: QueryFilter.FieldEnum.Name,
+                        value: "Global_1",
+                        op: QueryFilter.OpEnum.EQ
+                    ),
+                    new (
+                        field: QueryFilter.FieldEnum.AvailableSlots,
+                        value: "0",
+                        op: QueryFilter.OpEnum.GT
+                    )
+                },
+                Order = new List<QueryOrder>
+                {
+                    new (
+                        field: QueryOrder.FieldEnum.Created,
+                        asc: true
+                    )
+                }
+            }
+        );
+        
+        // Try to join existing global lobby
+        if (queryResponse.Data.Results?.Any() == true)
+        {
+            var globalLobby = queryResponse.Data.Results.First();
+            try
+            {
+                var joinResponse = await gameApiClient.Lobby.JoinLobbyByIdAsync(
+                    context,
+                    context.AccessToken,
+                    globalLobby.Id,
+                    player: playerWithUsername  // Use playerWithUsername instead
+                );
+                
+                return new JoinGlobalLobbyResponse
+                {
+                    LobbyId = globalLobby.Id,
+                    LobbyName = globalLobby.Name,
+                    PlayerCount = joinResponse.Data.Players.Count,
+                    Success = true
+                };
+            }
+            catch
+            {
+                // Lobby might have filled up, fall through to create new one
+            }
+        }
+        
+        // Create new lobby with username
+        var createResponse = await gameApiClient.Lobby.CreateLobbyAsync(
+            context,
+            context.AccessToken,
+            createRequest: new CreateRequest(
+                name: "Global_1",
+                maxPlayers: 150,
+                isPrivate: false,
+                isLocked: false,
+                player: playerWithUsername  // Use playerWithUsername here too
+            )
+        );
+
+        return new JoinGlobalLobbyResponse
+        {
+            LobbyId = createResponse.Data.Id,
+            LobbyName = createResponse.Data.Name,
+            PlayerCount = 1,
+            Success = true
+        };
     }
+
 
     [CloudCodeFunction("HostLobby")]
     public async Task<HostGameResponse> HostLobby(IExecutionContext context)
@@ -185,6 +279,26 @@ public class Duel
         };
     }
 
+
+    #region PrivateMethods
+
+    private async Task UpdatePlayerUsername(IExecutionContext context, string username)
+    {
+        var gameApiClient = GameApiClient.Create();
+    
+        // Unity Cloud Save handles atomic operations PER PLAYER
+        // Each player's data is separate - no cross-player conflicts
+        await gameApiClient.CloudSaveData.SetCustomItemAsync(
+            context,
+            context.ServiceToken,
+            context.ProjectId,
+            context.PlayerId,  // Key = player's unique ID
+            new SetItemBody("username", username)
+        );
+    }
+
+    #endregion
+
 }
 
 public class HostGameResponse
@@ -212,4 +326,12 @@ public class ReflexGameData
     public string player2Id { get; set; }
     public int player1Time { get; set; }
     public int player2Time { get; set; }
+}
+
+public class JoinGlobalLobbyResponse
+{
+    public string LobbyId { get; set; }
+    public string LobbyName { get; set; }
+    public int PlayerCount { get; set; }
+    public bool Success { get; set; }
 }
