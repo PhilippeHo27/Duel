@@ -12,7 +12,8 @@ namespace Duel
         [SerializeField] private Image gameImage;
         [SerializeField] private TMP_Text instructionText;
         [SerializeField] private TMP_Text declareWinnerText;
-        
+        //[SerializeField] private Button backButton;
+
         [Header("Game Settings")]
         [SerializeField] private float minWaitTime = 2f;
         [SerializeField] private float maxWaitTime = 5f;
@@ -39,6 +40,7 @@ namespace Duel
             _reflexGameUgs = new ReflexGameUGS(UnityGameServicesManager.Instance);
             if (gameImage != null) _defaultBackground = gameImage.color;
             SetupInitialState();
+            //backButton?.onClick.AddListener(() => SceneLoader.Instance.UnloadAdditiveScene("ReflexGame", () => Debug.Log("yup")));
         }
         
         private void SetupInitialState()
@@ -142,7 +144,7 @@ namespace Duel
             {
                 var result = await _reflexGameUgs.SubmitReflexResult(DataManager.Instance.lobbyName, reactionTimeMs);
                 if (declareWinnerText != null)
-                     declareWinnerText.text = result.winner;
+                     declareWinnerText.text = result.Winner;
             }
             catch (System.Exception ex)
             {

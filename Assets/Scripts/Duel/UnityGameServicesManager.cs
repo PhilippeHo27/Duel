@@ -43,7 +43,7 @@ namespace Duel
                     "JoinGlobalLobby",
                     new Dictionary<string, object> { { "username", username } }
                 );
-                Debug.Log($"Joined global lobby: {result.LobbyName} with {result.PlayerCount} players");
+                Debug.Log($"Joined global lobby: {result.lobbyName} with {result.playerCount} players");
                 return result;
             }
             catch (CloudCodeException e)
@@ -60,14 +60,15 @@ namespace Duel
             }
         }
         
-        public async Task<HostGameResponse> HostLobby()
+        public async Task<HostGameResponse> HostLobby(string gameType)
         {
-            Debug.Log($"Attempting to call {moduleName}/HostLobby...");
+            Debug.Log($"Attempting to call {moduleName}/HostLobby with gameType: {gameType}");
             try
             {
                 var result = await CloudCodeService.Instance.CallModuleEndpointAsync<HostGameResponse>(
                     moduleName,
-                    "HostLobby"
+                    "HostLobby",
+                    new Dictionary<string, object> { { "gameType", gameType } }
                 );
                 Debug.Log($"Hosted real Unity lobby with code: {result.lobbyCode}");
                 return result;
@@ -86,15 +87,19 @@ namespace Duel
             }
         }
 
-        public async Task<JoinGameResponse> JoinLobby(string lobbyCode)
+        public async Task<JoinGameResponse> JoinLobby(string lobbyCode, string gameType)
         {
-            Debug.Log($"Attempting to call {moduleName}/JoinLobby...");
+            Debug.Log($"Attempting to call {moduleName}/JoinLobby with lobbyCode: {lobbyCode}, gameType: {gameType}");
             try
             {
                 var result = await CloudCodeService.Instance.CallModuleEndpointAsync<JoinGameResponse>(
                     moduleName,
                     "JoinLobby",
-                    new Dictionary<string, object> { { "lobbyCode", lobbyCode } }
+                    new Dictionary<string, object> 
+                    { 
+                        { "lobbyCode", lobbyCode },
+                        { "gameType", gameType }
+                    }
                 );
                 Debug.Log($"Joined real Unity lobby: {result.session}");
                 return result;
@@ -113,13 +118,43 @@ namespace Duel
             }
         }
 
+        
+        public async Task<QuickMatchResponse> QuickMatch(string gameType)
+        {
+            Debug.Log($"Attempting to call {moduleName}/QuickMatch with gameType: {gameType}");
+            try
+            {
+                var result = await CloudCodeService.Instance.CallModuleEndpointAsync<QuickMatchResponse>(
+                    moduleName,
+                    "QuickMatch",
+                    new Dictionary<string, object> { { "gameType", gameType } }
+                );
+                Debug.Log($"QuickMatch result - Session: {result.session}, OpponentId: {result.opponentId}, IsHost: {result.isHost}");
+                return result;
+            }
+            catch (CloudCodeException e)
+            {
+                Debug.LogError($"Failed QuickMatch (CloudCodeException): {e.Message} | Error Code: {e.ErrorCode} | Reason: {e.Reason}");
+                Debug.LogError($"Details: {e.ToString()}");
+                return null;
+            }
+            catch (Exception e)
+            {
+                Debug.LogError($"Failed QuickMatch (System.Exception): {e.Message}");
+                Debug.LogError($"Details: {e.ToString()}");
+                return null;
+            }
+        }
+
+
+
         [Serializable]
         public class JoinGlobalLobbyResponse
         {
-            public string LobbyId;
-            public string LobbyName;
-            public int PlayerCount;
-            public bool Success;
+            public string lobbyId;
+            public string lobbyName;
+            public int playerCount;
+            public bool success;
         }
 
         [Serializable]
@@ -133,6 +168,14 @@ namespace Duel
         {
             public string session;
             public string opponentId;
+        }
+        
+        [Serializable]
+        public class QuickMatchResponse
+        {
+            public string session;
+            public string opponentId;
+            public bool isHost;
         }
     }
 }

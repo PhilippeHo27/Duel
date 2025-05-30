@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
@@ -10,7 +11,10 @@ namespace Duel;
 
 public class Duel
 {
-    private readonly IGameApiClient _gameApiClient;
+    private static readonly Dictionary<string, Func<IExecutionContext, string, Task>> GameInitializers = new()
+    {
+        { "reflex", InitializeReflexGame }
+    };
     
     [CloudCodeFunction("JoinGlobalLobby")]
     public async Task<JoinGlobalLobbyResponse> JoinGlobalLobby(IExecutionContext context, string username)    
@@ -60,7 +64,7 @@ public class Duel
         );
         
         // Try to join existing global lobby
-        if (queryResponse.Data.Results?.Any() == true)
+        if (queryResponse.Data.Results.Any())
         {
             var globalLobby = queryResponse.Data.Results.First();
             try
@@ -108,76 +112,138 @@ public class Duel
         };
     }
 
-
     [CloudCodeFunction("HostLobby")]
-    public async Task<HostGameResponse> HostLobby(IExecutionContext context)
+    public async Task<HostGameResponse> HostLobby(IExecutionContext context, string gameType)
     {
-        // Create client directly each time
         var gameApiClient = GameApiClient.Create();
-        
+
+        if (context.PlayerId == null)
+        {
+            return new HostGameResponse { LobbyCode = null }; // or throw exception
+        }
+
         var lobbyResult = await gameApiClient.Lobby.CreateLobbyAsync(
             context, 
             context.AccessToken, 
             null, 
             null,
-            new CreateRequest($"{context.PlayerId}'s Duel", 2, false, false, new Player(context.PlayerId))
+            new CreateRequest($"{context.PlayerId}'s {gameType}", 2, false, false, new Player(context.PlayerId))
         );
-    
-        // Initialize the reflex game data in Cloud Save when hosting
+
         string sessionId = $"SESSION_{lobbyResult.Data.LobbyCode}";
-        string saveKey = "reflex_results";
-    
-        var initialGameData = new ReflexGameData
+
+        if (GameInitializers.TryGetValue(gameType.ToLower(), out var initializer))
         {
-            player1Id = "",
-            player2Id = "",
-            player1Time = 0,
-            player2Time = 0
-        };
-    
-        // Create the initial Cloud Save data structure
-        await gameApiClient.CloudSaveData.SetCustomItemAsync(
-            context, 
-            context.ServiceToken, 
-            context.ProjectId,
-            sessionId,
-            new SetItemBody(saveKey, System.Text.Json.JsonSerializer.Serialize(initialGameData))
-        );
-        
+            await initializer(context, sessionId);
+        }
+
         return new HostGameResponse()
         {
             LobbyCode = lobbyResult.Data.LobbyCode,
         };
     }
-
-
+    
     [CloudCodeFunction("JoinLobby")]
-    public async Task<JoinGameResponse> JoinLobby(IExecutionContext context, string lobbyCode)
+    public async Task<JoinGameResponse> JoinLobby(IExecutionContext context, string lobbyCode, string gameType)
     {
         var gameApiClient = GameApiClient.Create();
-        var pushClient = PushClient.Create();
-            
-        var joinLobbyResponse = await gameApiClient.Lobby.JoinLobbyByCodeAsync(
-            context, 
+
+        if (context.PlayerId == null)
+        {
+            return new JoinGameResponse { Session = null, OpponentId = null };
+        }
+
+        var result = await gameApiClient.Lobby.JoinLobbyByCodeAsync(
+            context,
             context.AccessToken,
             joinByCodeRequest: new JoinByCodeRequest(lobbyCode, new Player(context.PlayerId))
         );
-            
-        var lobbyData = joinLobbyResponse.Data;
-        string opponentId = lobbyData.Players.First(p => p.Id != context.PlayerId).Id;
-            
-        await pushClient.SendPlayerMessageAsync(
-            context,
-            $"{{\"playerId\":\"{context.PlayerId}\"}}",
-            "playerJoined",
-            opponentId
-        );
-            
-        return new JoinGameResponse()
+
+        string sessionId = $"SESSION_{lobbyCode}";
+
+        // Initialize game-specific data (same function as HostLobby)
+        if (GameInitializers.TryGetValue(gameType.ToLower(), out var initializer))
         {
-            Session = $"SESSION_{lobbyCode}",
-            OpponentId = opponentId
+            await initializer(context, sessionId);
+        }
+
+        return new JoinGameResponse
+        {
+            Session = result.Data.Id,
+            OpponentId = result.Data.Players.FirstOrDefault(p => p.Id != context.PlayerId)?.Id
         };
+    }
+    
+    [CloudCodeFunction("QuickMatch")]
+    public async Task<QuickMatchResponse> QuickMatch(IExecutionContext context, string gameType)
+    {
+        var gameApiClient = GameApiClient.Create();
+
+        if (context.PlayerId == null)
+        {
+            return new QuickMatchResponse { Session = null, OpponentId = null, IsHost = false };
+        }
+
+        // Look for existing lobbies with 1 player waiting for QuickMatch of the same game type
+        var queryResponse = await gameApiClient.Lobby.QueryLobbiesAsync(
+            context,
+            context.AccessToken,
+            queryRequest: new QueryRequest
+            {
+                Filter = new List<QueryFilter>
+                {
+                    new (field: QueryFilter.FieldEnum.AvailableSlots, value: "1", op: QueryFilter.OpEnum.EQ),
+                    new (field: QueryFilter.FieldEnum.MaxPlayers, value: "2", op: QueryFilter.OpEnum.EQ),
+                    new (field: QueryFilter.FieldEnum.IsLocked, value: "false", op: QueryFilter.OpEnum.EQ),
+                    new (field: QueryFilter.FieldEnum.S1, value: gameType, op: QueryFilter.OpEnum.EQ) // Filter by game type
+                }
+            }
+        );
+
+        // Try to join existing QuickMatch lobby
+        if (queryResponse.Data.Results.Any())
+        {
+            var availableLobby = queryResponse.Data.Results.First();
+            var joinResponse = await gameApiClient.Lobby.JoinLobbyByIdAsync(
+                context, context.AccessToken, availableLobby.Id, player: new Player(context.PlayerId)
+            );
+
+            string sessionId = $"SESSION_{availableLobby.LobbyCode}";
+            
+            // Initialize game-specific data
+            if (GameInitializers.TryGetValue(gameType.ToLower(), out var initializer))
+            {
+                await initializer(context, sessionId);
+            }
+
+            string? opponentId = joinResponse.Data.Players.FirstOrDefault(p => p.Id != context.PlayerId)?.Id;
+            return new QuickMatchResponse { Session = sessionId, OpponentId = opponentId, IsHost = false };
+        }
+
+        // Create new QuickMatch lobby and wait
+        var createResponse = await gameApiClient.Lobby.CreateLobbyAsync(
+            context, context.AccessToken,
+            createRequest: new CreateRequest(
+                name: $"QuickMatch_{gameType}_{context.PlayerId}", 
+                maxPlayers: 2, 
+                isPrivate: false, 
+                player: new Player(context.PlayerId),
+                data: new Dictionary<string, DataObject>
+                {
+                    ["S1"] = new (gameType, DataObject.VisibilityEnum.Public)
+                }
+            )
+        );
+
+        string newSessionId = $"SESSION_{createResponse.Data.LobbyCode}";
+        
+        // Initialize game-specific data for new lobby
+        if (GameInitializers.TryGetValue(gameType.ToLower(), out var newInitializer))
+        {
+            await newInitializer(context, newSessionId);
+        }
+
+        return new QuickMatchResponse { Session = newSessionId, OpponentId = null, IsHost = true };
     }
 
     [CloudCodeFunction("SubmitReflexResult")]
@@ -197,7 +263,7 @@ public class Duel
         );
         
         ReflexGameData gameData;
-        if (saveResponse.Data?.Results?.Any() == true)
+        if (saveResponse.Data.Results.Any())
         {
             var result = saveResponse.Data.Results.Find(r => r.Key == saveKey);
             gameData = System.Text.Json.JsonSerializer.Deserialize<ReflexGameData>(result.Value.ToString());
@@ -208,19 +274,19 @@ public class Duel
         }
         
         // Store this player's result
-        if (string.IsNullOrEmpty(gameData.player1Id))
+        if (string.IsNullOrEmpty(gameData.Player1Id))
         {
-            gameData.player1Id = context.PlayerId;
-            gameData.player1Time = reactionTimeMs;
+            gameData.Player1Id = context.PlayerId;
+            gameData.Player1Time = reactionTimeMs;
         }
-        else if (gameData.player1Id == context.PlayerId)
+        else if (gameData.Player1Id == context.PlayerId)
         {
-            gameData.player1Time = reactionTimeMs;
+            gameData.Player1Time = reactionTimeMs;
         }
         else
         {
-            gameData.player2Id = context.PlayerId;
-            gameData.player2Time = reactionTimeMs;
+            gameData.Player2Id = context.PlayerId;
+            gameData.Player2Time = reactionTimeMs;
         }
         
         // Save updated game data
@@ -233,27 +299,27 @@ public class Duel
         );
         
         // Check if both players submitted
-        if (gameData.player1Time > 0 && gameData.player2Time > 0)
+        if (gameData.Player1Time > 0 && gameData.Player2Time > 0)
         {
             // Determine winner
             string winner = "tie";
-            if (gameData.player1Time < gameData.player2Time)
+            if (gameData.Player1Time < gameData.Player2Time)
             {
-                winner = gameData.player1Id == context.PlayerId ? "you" : "opponent";
+                winner = gameData.Player1Id == context.PlayerId ? "you" : "opponent";
             }
-            else if (gameData.player2Time < gameData.player1Time)
+            else if (gameData.Player2Time < gameData.Player1Time)
             {
-                winner = gameData.player2Id == context.PlayerId ? "you" : "opponent";
+                winner = gameData.Player2Id == context.PlayerId ? "you" : "opponent";
             }
             
             // Notify the other player
             var pushClient = PushClient.Create();
-            string otherPlayerId = context.PlayerId == gameData.player1Id ? gameData.player2Id : gameData.player1Id;
+            string? otherPlayerId = context.PlayerId == gameData.Player1Id ? gameData.Player2Id : gameData.Player1Id;
             string otherPlayerWinner = winner == "you" ? "opponent" : (winner == "opponent" ? "you" : "tie");
             
-            int otherPlayerTime = otherPlayerId == gameData.player1Id ? gameData.player1Time : gameData.player2Time;
-            int currentPlayerTime = context.PlayerId == gameData.player1Id ? gameData.player1Time : gameData.player2Time;
-
+            int otherPlayerTime = (otherPlayerId == gameData.Player1Id ? gameData.Player1Time : gameData.Player2Time);
+            int currentPlayerTime = (context.PlayerId == gameData.Player1Id ? gameData.Player1Time : gameData.Player2Time);
+            
             await pushClient.SendPlayerMessageAsync(
                 context,
                 $"{{\"winner\":\"{otherPlayerWinner}\",\"yourTime\":{otherPlayerTime},\"opponentTime\":{currentPlayerTime},\"gameOver\":true}}",
@@ -263,22 +329,21 @@ public class Duel
             
             return new ResultResponse
             {
-                winner = winner,
-                yourTime = reactionTimeMs,
-                opponentTime = context.PlayerId == gameData.player1Id ? gameData.player2Time : gameData.player1Time,
-                gameOver = true
+                Winner = winner,
+                YourTime = reactionTimeMs,
+                OpponentTime = context.PlayerId == gameData.Player1Id ? gameData.Player2Time : gameData.Player1Time,
+                GameOver = true
             };
         }
 
         return new ResultResponse
         {
-            winner = "waiting",
-            yourTime = reactionTimeMs,
-            opponentTime = 0,
-            gameOver = false
+            Winner = "waiting",
+            YourTime = reactionTimeMs,
+            OpponentTime = 0,
+            GameOver = false
         };
     }
-
 
     #region PrivateMethods
 
@@ -297,6 +362,23 @@ public class Duel
         );
     }
 
+    private static async Task InitializeReflexGame(IExecutionContext context, string sessionId)
+    {
+        var gameApiClient = GameApiClient.Create();
+        var initialGameData = new ReflexGameData
+        {
+            Player1Id = "",
+            Player2Id = "",
+            Player1Time = 0,
+            Player2Time = 0
+        };
+    
+        await gameApiClient.CloudSaveData.SetCustomItemAsync(
+            context, context.ServiceToken, context.ProjectId, sessionId,
+            new SetItemBody("reflex_results", System.Text.Json.JsonSerializer.Serialize(initialGameData))
+        );
+    }
+
     #endregion
 
 }
@@ -312,20 +394,28 @@ public class JoinGameResponse
     public string OpponentId { get; set; }
 }
 
+public class QuickMatchResponse
+{
+    public string Session { get; set; }
+    public string OpponentId { get; set; }
+    public bool IsHost { get; set; }
+}
+
+
 public class ResultResponse
 {
-    public string winner { get; set; }
-    public int yourTime { get; set; }
-    public int opponentTime { get; set; }
-    public bool gameOver { get; set; }
+    public string Winner { get; set; }
+    public int YourTime { get; set; }
+    public int OpponentTime { get; set; }
+    public bool GameOver { get; set; }
 }
 
 public class ReflexGameData
 {
-    public string player1Id { get; set; }
-    public string player2Id { get; set; }
-    public int player1Time { get; set; }
-    public int player2Time { get; set; }
+    public string Player1Id { get; set; }
+    public string Player2Id { get; set; }
+    public int Player1Time { get; set; }
+    public int Player2Time { get; set; }
 }
 
 public class JoinGlobalLobbyResponse

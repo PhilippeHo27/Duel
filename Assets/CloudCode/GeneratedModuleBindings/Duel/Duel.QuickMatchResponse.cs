@@ -4,15 +4,14 @@ using System;
 
 namespace Unity.Services.CloudCode.GeneratedBindings.Duel
 {
-    public partial class ResultResponse
+    public partial class QuickMatchResponse
     {
-        public string Winner;
-        public int YourTime;
-        public int OpponentTime;
-        public bool GameOver;
+        public string Session;
+        public string OpponentId;
+        public bool IsHost;
 
         [Preserve]
-        public ResultResponse ()
+        public QuickMatchResponse ()
         {
         }
     }

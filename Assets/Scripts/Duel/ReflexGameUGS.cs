@@ -7,14 +7,12 @@ namespace Duel
 {
     public class ReflexGameUGS
     {
-        private UnityGameServicesManager _ugsManager;
-        private string _moduleName;
+        private readonly string _moduleName;
         
         public ReflexGameUGS(UnityGameServicesManager ugsManager)
         {
-            _ugsManager = ugsManager;
-            _ugsManager.ReflexGameUgs = this;
-            _moduleName = _ugsManager.moduleName;
+            ugsManager.ReflexGameUgs = this;
+            _moduleName = ugsManager.moduleName;
         }
         
         public async Task<ResultResponse> SubmitReflexResult(string sessionId, int reactionTimeMs)
@@ -34,7 +32,7 @@ namespace Duel
                     parameters
                 );
         
-                Debug.Log($"Submitted reflex result - Time: {reactionTimeMs}ms, Winner: {result.winner}");
+                Debug.Log($"Submitted reflex result - Time: {reactionTimeMs}ms, Winner: {result.Winner}");
                 return result;
             }
             catch (CloudCodeException e)
@@ -55,9 +53,9 @@ namespace Duel
     
     public class ResultResponse
     {
-        public string winner;
-        public int yourTime;
-        public int opponentTime;
-        public bool gameOver;
+        public string Winner;
+        public int YourTime;
+        public int OpponentTime;
+        public bool GameOver;
     }
 }

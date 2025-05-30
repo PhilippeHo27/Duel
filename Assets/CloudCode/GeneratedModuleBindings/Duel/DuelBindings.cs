@@ -24,17 +24,18 @@ namespace Unity.Services.CloudCode.GeneratedBindings
                 });
         }
 
-        public async Task<Duel.HostGameResponse> HostLobby()
+        public async Task<Duel.HostGameResponse> HostLobby(string gameType)
         {
             return await k_Service.CallModuleEndpointAsync<Duel.HostGameResponse>(
                 "Duel",
                 "HostLobby",
                 new Dictionary<string, object>()
                 {
+                    {"gameType", gameType},
                 });
         }
 
-        public async Task<Duel.JoinGameResponse> JoinLobby(string lobbyCode)
+        public async Task<Duel.JoinGameResponse> JoinLobby(string lobbyCode, string gameType)
         {
             return await k_Service.CallModuleEndpointAsync<Duel.JoinGameResponse>(
                 "Duel",
@@ -42,6 +43,18 @@ namespace Unity.Services.CloudCode.GeneratedBindings
                 new Dictionary<string, object>()
                 {
                     {"lobbyCode", lobbyCode},
+                    {"gameType", gameType},
+                });
+        }
+
+        public async Task<Duel.QuickMatchResponse> QuickMatch(string gameType)
+        {
+            return await k_Service.CallModuleEndpointAsync<Duel.QuickMatchResponse>(
+                "Duel",
+                "QuickMatch",
+                new Dictionary<string, object>()
+                {
+                    {"gameType", gameType},
                 });
         }
 
