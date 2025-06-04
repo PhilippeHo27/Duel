@@ -8,11 +8,13 @@ namespace Duel
 {
     public class ReflexGame : MonoBehaviour, IPointerClickHandler
     {
+        [Header("Game Lock")]
+        [SerializeField] private GameObject gameLockOverlay;
+        
         [Header("UI Elements")]
         [SerializeField] private Image gameImage;
         [SerializeField] private TMP_Text instructionText;
-        [SerializeField] private TMP_Text declareWinnerText;
-        //[SerializeField] private Button backButton;
+        [SerializeField] private GameLeaderboard gameLeaderboard;
 
         [Header("Game Settings")]
         [SerializeField] private float minWaitTime = 2f;
@@ -30,17 +32,18 @@ namespace Duel
 
         private bool _gameActive;
         private bool _waitingForClick;
-        private float _gameStartTime;
         private bool _gameStarted;
-
+        private bool _gameUnlocked;
+        private float _gameStartTime;
         private ReflexGameUGS _reflexGameUgs;
+
         
         void Start()
         {
-            _reflexGameUgs = new ReflexGameUGS(UnityGameServicesManager.Instance);
+            _reflexGameUgs = new ReflexGameUGS();
+            UnityGameServicesManager.Instance.ReflexGameRef = this;
             if (gameImage != null) _defaultBackground = gameImage.color;
             SetupInitialState();
-            //backButton?.onClick.AddListener(() => SceneLoader.Instance.UnloadAdditiveScene("ReflexGame", () => Debug.Log("yup")));
         }
         
         private void SetupInitialState()
@@ -50,6 +53,11 @@ namespace Duel
                 
             if (instructionText != null)
                 instructionText.text = InitialText;
+            
+            if (gameLockOverlay != null)
+            {
+                gameLockOverlay.GetComponent<Image>().raycastTarget = true;
+            }
                 
             _gameStarted = false;
         }
@@ -58,6 +66,12 @@ namespace Duel
         {
             if (eventData.pointerCurrentRaycast.gameObject != gameImage.gameObject) 
                 return;
+            
+            if (!_gameUnlocked)
+            {
+                Debug.Log("Game is locked! Host/Join/QuickMatch first!");
+                return;
+            }
 
             if (!_gameStarted)
             {
@@ -81,7 +95,16 @@ namespace Duel
             int reactionTimeMs = Mathf.RoundToInt(reactionTime * 1000);
             EndGame(true, reactionTimeMs);
         }
-        
+
+        public void Ready()
+        {
+            _gameUnlocked = true;
+            if (gameLockOverlay != null)
+            {
+                gameLockOverlay.SetActive(false);
+            }
+        }
+
         private void StartGame()
         {
             if (_gameActive) return;
@@ -120,7 +143,7 @@ namespace Duel
         {
             _gameActive = false;
             _waitingForClick = false;
-    
+
             if (gameImage != null)
                 gameImage.color = _defaultBackground;
 
@@ -128,7 +151,8 @@ namespace Duel
             {
                 if (instructionText != null)
                     instructionText.text = string.Format(ResultText, reactionTimeMs);
-    
+
+                AddMyScoreToLeaderboard(reactionTimeMs);
                 SubmitResultAsync(reactionTimeMs);
             }
             else
@@ -137,14 +161,35 @@ namespace Duel
                     instructionText.text = TooSoonText;
             }
         }
+        
+        private void AddMyScoreToLeaderboard(int reactionTimeMs)
+        {
+            string myPlayerId = Unity.Services.Authentication.AuthenticationService.Instance.PlayerId;
+            string myPlayerName = PlayerPrefs.GetString("Username");
+    
+            gameLeaderboard.AddOrUpdatePlayerScore(myPlayerId, myPlayerName, reactionTimeMs);
+        }
+        
+        public void OnOpponentScoreReceived(object reflexDataObj)
+        {
+            var reflexData = (Newtonsoft.Json.Linq.JObject)reflexDataObj;
+    
+            // Extract the data
+            string playerId = reflexData["PlayerId"]?.ToString();
+            string playerName = reflexData["PlayerName"]?.ToString();
+            int reactionTimeMs = reflexData["ReactionTimeMs"]?.ToObject<int>() ?? 0;
+            
+            Debug.Log("playerId:    " + playerId + "playerName:  " + playerName + "reactionTime:  " + reactionTimeMs);
 
+            gameLeaderboard.AddOrUpdatePlayerScore(playerId, playerName, reactionTimeMs);
+        }
+        
         private async void SubmitResultAsync(int reactionTimeMs)
         {
             try
             {
-                var result = await _reflexGameUgs.SubmitReflexResult(DataManager.Instance.lobbyName, reactionTimeMs);
-                if (declareWinnerText != null)
-                     declareWinnerText.text = result.Winner;
+                await _reflexGameUgs.SubmitReflexResult(UnityGameServicesManager.Instance.LobbyID, reactionTimeMs, PlayerPrefs.GetString("Username") );
+                Debug.Log("Score submission completed successfully");
             }
             catch (System.Exception ex)
             {

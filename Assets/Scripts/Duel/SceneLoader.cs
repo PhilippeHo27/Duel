@@ -10,7 +10,9 @@ namespace Duel
     public class SceneLoader : IndestructibleSingletonBehaviour<SceneLoader>
     {
         [SerializeField] private bool debugLogging = true;
-        
+        private string _currentAdditiveScene = "";
+        public string CurrentAdditiveScene { get => _currentAdditiveScene; set => _currentAdditiveScene = value; }
+
         private readonly Dictionary<string, AsyncOperation> _activeOperations = new Dictionary<string, AsyncOperation>();
         
         public void LoadSceneAdditive(string sceneName, Action onStart = null, Action<float> onProgress = null, Action onComplete = null)
@@ -129,6 +131,7 @@ namespace Duel
             }
     
             _activeOperations.Remove(sceneName);
+            _currentAdditiveScene = sceneName;
             LogDebug($"Scene loaded successfully: {sceneName}");
             onComplete?.Invoke();
         }

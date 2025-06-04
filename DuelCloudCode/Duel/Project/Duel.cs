@@ -6,422 +6,247 @@ using Unity.Services.CloudCode.Apis;
 using Unity.Services.CloudCode.Core;
 using Unity.Services.Lobby.Model;
 using Unity.Services.CloudSave.Model;
+using Newtonsoft.Json;
 
 namespace Duel;
 
 public class Duel
 {
-    private static readonly Dictionary<string, Func<IExecutionContext, string, Task>> GameInitializers = new()
-    {
-        { "reflex", InitializeReflexGame }
-    };
-    
-    [CloudCodeFunction("JoinGlobalLobby")]
-    public async Task<JoinGlobalLobbyResponse> JoinGlobalLobby(IExecutionContext context, string username)    
+    private readonly IPushClient _pushClient = PushClient.Create();
+    // private static readonly Dictionary<string, Func<IExecutionContext, string, Task>> GameInitializers = new() { { "reflex", InitializeReflexGame } };
+
+    [CloudCodeFunction("HostLobby")]
+    public async Task<UgsResponse> HostLobby(IExecutionContext context, string gameType, string userName)
     {
         var gameApiClient = GameApiClient.Create();
-        
-        await UpdatePlayerUsername(context, username);
-        
-        // Create player with username data
-        var playerWithUsername = new Player(
-            id: context.PlayerId!,
-            data: new Dictionary<string, PlayerDataObject>
-            {
-                { "username", new PlayerDataObject(
-                    value: username,
-                    visibility: PlayerDataObject.VisibilityEnum.Member
-                )}
-            }
-        );
 
-        var queryResponse = await gameApiClient.Lobby.QueryLobbiesAsync(
-            context,
-            context.AccessToken,
-            queryRequest: new QueryRequest
-            {
-                Filter = new List<QueryFilter>
-                {
-                    new (
-                        field: QueryFilter.FieldEnum.Name,
-                        value: "Global_1",
-                        op: QueryFilter.OpEnum.EQ
-                    ),
-                    new (
-                        field: QueryFilter.FieldEnum.AvailableSlots,
-                        value: "0",
-                        op: QueryFilter.OpEnum.GT
-                    )
-                },
-                Order = new List<QueryOrder>
-                {
-                    new (
-                        field: QueryOrder.FieldEnum.Created,
-                        asc: true
-                    )
-                }
-            }
-        );
-        
-        // Try to join existing global lobby
-        if (queryResponse.Data.Results.Any())
-        {
-            var globalLobby = queryResponse.Data.Results.First();
-            try
-            {
-                var joinResponse = await gameApiClient.Lobby.JoinLobbyByIdAsync(
-                    context,
-                    context.AccessToken,
-                    globalLobby.Id,
-                    player: playerWithUsername  // Use playerWithUsername instead
-                );
-                
-                return new JoinGlobalLobbyResponse
-                {
-                    LobbyId = globalLobby.Id,
-                    LobbyName = globalLobby.Name,
-                    PlayerCount = joinResponse.Data.Players.Count,
-                    Success = true
-                };
-            }
-            catch
-            {
-                // Lobby might have filled up, fall through to create new one
-            }
-        }
-        
-        // Create new lobby with username
-        var createResponse = await gameApiClient.Lobby.CreateLobbyAsync(
+        var response = await gameApiClient.Lobby.CreateLobbyAsync(
             context,
             context.AccessToken,
             createRequest: new CreateRequest(
-                name: "Global_1",
+                name: $"{gameType}Game initiated by {userName}",
                 maxPlayers: 150,
                 isPrivate: false,
                 isLocked: false,
-                player: playerWithUsername  // Use playerWithUsername here too
+                player: CreatePlayerProfile(context, userName),
+                data: new Dictionary<string, DataObject>
+                {
+                    {
+                        "S1", new DataObject(
+                            value: gameType,
+                            visibility: DataObject.VisibilityEnum.Public,
+                            index: DataObject.IndexEnum.S1
+                        )
+                    }
+                }
             )
         );
 
-        return new JoinGlobalLobbyResponse
+        return new UgsResponse
         {
-            LobbyId = createResponse.Data.Id,
-            LobbyName = createResponse.Data.Name,
-            PlayerCount = 1,
+            LobbyID = response.Data.Id,
+            LobbyCode = response.Data.LobbyCode,
+            LobbyName = response.Data.Name,
+            IsHost = true,
+            PlayerCount = response.Data.Players.Count,
             Success = true
         };
     }
 
-    [CloudCodeFunction("HostLobby")]
-    public async Task<HostGameResponse> HostLobby(IExecutionContext context, string gameType)
+    [CloudCodeFunction("JoinLobby")]
+    public async Task<UgsResponse> JoinLobby(IExecutionContext context, string lobbyCode, string userName)
     {
         var gameApiClient = GameApiClient.Create();
 
-        if (context.PlayerId == null)
-        {
-            return new HostGameResponse { LobbyCode = null }; // or throw exception
-        }
-
-        var lobbyResult = await gameApiClient.Lobby.CreateLobbyAsync(
-            context, 
-            context.AccessToken, 
-            null, 
-            null,
-            new CreateRequest($"{context.PlayerId}'s {gameType}", 2, false, false, new Player(context.PlayerId))
+        var response = await gameApiClient.Lobby.JoinLobbyByCodeAsync(
+            context,
+            context.AccessToken,
+            joinByCodeRequest: new JoinByCodeRequest(lobbyCode, CreatePlayerProfile(context, userName))
         );
 
-        string sessionId = $"SESSION_{lobbyResult.Data.LobbyCode}";
-
-        if (GameInitializers.TryGetValue(gameType.ToLower(), out var initializer))
+        return new UgsResponse
         {
-            await initializer(context, sessionId);
-        }
-
-        return new HostGameResponse()
-        {
-            LobbyCode = lobbyResult.Data.LobbyCode,
+            LobbyID = response.Data.Id,
+            LobbyCode = response.Data.LobbyCode,
+            LobbyName = response.Data.Name,
+            IsHost = response.Data.HostId == context.PlayerId,
+            PlayerCount = response.Data.Players.Count,
+            Success = true
         };
     }
     
-    [CloudCodeFunction("JoinLobby")]
-    public async Task<JoinGameResponse> JoinLobby(IExecutionContext context, string lobbyCode, string gameType)
+    [CloudCodeFunction("LeaveLobby")]
+    public async Task<UgsResponse> LeaveLobby(IExecutionContext context, string lobbyId)
     {
         var gameApiClient = GameApiClient.Create();
 
-        if (context.PlayerId == null)
-        {
-            return new JoinGameResponse { Session = null, OpponentId = null };
-        }
-
-        var result = await gameApiClient.Lobby.JoinLobbyByCodeAsync(
+        await gameApiClient.Lobby.RemovePlayerAsync(
             context,
             context.AccessToken,
-            joinByCodeRequest: new JoinByCodeRequest(lobbyCode, new Player(context.PlayerId))
+            lobbyId,
+            context.PlayerId!
         );
 
-        string sessionId = $"SESSION_{lobbyCode}";
-
-        // Initialize game-specific data (same function as HostLobby)
-        if (GameInitializers.TryGetValue(gameType.ToLower(), out var initializer))
+        return new UgsResponse
         {
-            await initializer(context, sessionId);
-        }
-
-        return new JoinGameResponse
-        {
-            Session = result.Data.Id,
-            OpponentId = result.Data.Players.FirstOrDefault(p => p.Id != context.PlayerId)?.Id
+            Success = true
         };
     }
     
     [CloudCodeFunction("QuickMatch")]
-    public async Task<QuickMatchResponse> QuickMatch(IExecutionContext context, string gameType)
+    public async Task<UgsResponse> QuickMatch(IExecutionContext context, string gameType, string userName)
     {
         var gameApiClient = GameApiClient.Create();
+        var playerWithUsername = CreatePlayerProfile(context, userName); 
 
-        if (context.PlayerId == null)
-        {
-            return new QuickMatchResponse { Session = null, OpponentId = null, IsHost = false };
-        }
-
-        // Look for existing lobbies with 1 player waiting for QuickMatch of the same game type
-        var queryResponse = await gameApiClient.Lobby.QueryLobbiesAsync(
+        // Look for existing lobbies
+        var response = await gameApiClient.Lobby.QueryLobbiesAsync(
             context,
             context.AccessToken,
             queryRequest: new QueryRequest
             {
                 Filter = new List<QueryFilter>
                 {
-                    new (field: QueryFilter.FieldEnum.AvailableSlots, value: "1", op: QueryFilter.OpEnum.EQ),
-                    new (field: QueryFilter.FieldEnum.MaxPlayers, value: "2", op: QueryFilter.OpEnum.EQ),
-                    new (field: QueryFilter.FieldEnum.IsLocked, value: "false", op: QueryFilter.OpEnum.EQ),
-                    new (field: QueryFilter.FieldEnum.S1, value: gameType, op: QueryFilter.OpEnum.EQ) // Filter by game type
+                    // new (field: QueryFilter.FieldEnum.S1, value: gameType, op: QueryFilter.OpEnum.CONTAINS),
+                    new(field: QueryFilter.FieldEnum.AvailableSlots, value: "0", op: QueryFilter.OpEnum.GT),
+                    new(field: QueryFilter.FieldEnum.IsLocked, value: "false", op: QueryFilter.OpEnum.EQ)
                 }
             }
         );
 
-        // Try to join existing QuickMatch lobby
-        if (queryResponse.Data.Results.Any())
+        if (response.Data.Results.Any())
         {
-            var availableLobby = queryResponse.Data.Results.First();
+            // Join an existing lobby
+            var availableLobby = response.Data.Results.First();
+
             var joinResponse = await gameApiClient.Lobby.JoinLobbyByIdAsync(
-                context, context.AccessToken, availableLobby.Id, player: new Player(context.PlayerId)
+                context, context.AccessToken, availableLobby.Id,
+                player: playerWithUsername
             );
 
-            string sessionId = $"SESSION_{availableLobby.LobbyCode}";
-            
-            // Initialize game-specific data
-            if (GameInitializers.TryGetValue(gameType.ToLower(), out var initializer))
+            var playerJoinedData = new
             {
-                await initializer(context, sessionId);
+                PlayerId = context.PlayerId,
+                PlayerName = userName,
+                GameType = gameType // Just add this one line
+            };
+
+            // Get all players except yourself
+            var existingPlayerIds = joinResponse.Data.Players
+                .Where(p => p.Id != context.PlayerId)
+                .Select(p => p.Id);
+
+            foreach (string playerId in existingPlayerIds)
+            {
+                await _pushClient.SendPlayerMessageAsync(
+                    context,
+                    JsonConvert.SerializeObject(playerJoinedData),
+                    "playerJoined",
+                    playerId
+                );
             }
 
-            string? opponentId = joinResponse.Data.Players.FirstOrDefault(p => p.Id != context.PlayerId)?.Id;
-            return new QuickMatchResponse { Session = sessionId, OpponentId = opponentId, IsHost = false };
+            return new UgsResponse
+            {
+                LobbyID = joinResponse.Data.Id,
+                LobbyCode = joinResponse.Data.LobbyCode,
+                LobbyName = joinResponse.Data.Name,
+                IsHost = joinResponse.Data.HostId == context.PlayerId,
+                PlayerCount = joinResponse.Data.Players.Count,
+                Success = true
+            };
         }
 
-        // Create new QuickMatch lobby and wait
+        // Create new lobby if we can't join one
         var createResponse = await gameApiClient.Lobby.CreateLobbyAsync(
-            context, context.AccessToken,
+            context,
+            context.AccessToken,
             createRequest: new CreateRequest(
-                name: $"QuickMatch_{gameType}_{context.PlayerId}", 
-                maxPlayers: 2, 
-                isPrivate: false, 
-                player: new Player(context.PlayerId),
+                name: $"{gameType}Game initiated by {userName}",
+                maxPlayers: 150,
+                isPrivate: false,
+                isLocked: false,
+                player: playerWithUsername,
                 data: new Dictionary<string, DataObject>
                 {
-                    ["S1"] = new (gameType, DataObject.VisibilityEnum.Public)
+                    {
+                        "S1", new DataObject(
+                            value: gameType,
+                            visibility: DataObject.VisibilityEnum.Public,
+                            index: DataObject.IndexEnum.S1
+                        )
+                    }
                 }
             )
         );
 
-        string newSessionId = $"SESSION_{createResponse.Data.LobbyCode}";
-        
-        // Initialize game-specific data for new lobby
-        if (GameInitializers.TryGetValue(gameType.ToLower(), out var newInitializer))
+        return new UgsResponse
         {
-            await newInitializer(context, newSessionId);
-        }
-
-        return new QuickMatchResponse { Session = newSessionId, OpponentId = null, IsHost = true };
+            LobbyID = createResponse.Data.Id,
+            LobbyCode = createResponse.Data.LobbyCode,
+            LobbyName = createResponse.Data.Name,
+            IsHost = createResponse.Data.HostId == context.PlayerId,
+            PlayerCount = createResponse.Data.Players.Count,
+            Success = true
+        };
     }
 
     [CloudCodeFunction("SubmitReflexResult")]
-    public async Task<ResultResponse> SubmitReflexResult(IExecutionContext context, string sessionId, int reactionTimeMs)
+    public async Task SubmitReflexResult(IExecutionContext context, string lobbyId, int reactionTimeMs, string playerName)        
     {
         var gameApiClient = GameApiClient.Create();
+
+        // Get lobby info 
+        var lobbyResponse = await gameApiClient.Lobby.GetLobbyAsync(context, context.AccessToken, lobbyId);
         
-        string saveKey = "reflex_results";
+        // Get ALL other players (everyone except current player)
+        var otherPlayerIds = lobbyResponse.Data.Players
+            .Where(p => p.Id != context.PlayerId)
+            .Select(p => p.Id);
+
+        // Create score data to broadcast
+        var scoreData = new 
+        {
+            PlayerId = context.PlayerId!,
+            PlayerName = playerName,
+            ReactionTimeMs = reactionTimeMs
+        };
         
-        // Try to get existing game data
-        var saveResponse = await gameApiClient.CloudSaveData.GetCustomItemsAsync(
-            context, 
-            context.ServiceToken, 
-            context.ProjectId,
-            sessionId, 
-            new List<string> { saveKey }
-        );
-        
-        ReflexGameData gameData;
-        if (saveResponse.Data.Results.Any())
+        // Broadcast to all other players in the lobby
+        foreach (var playerId in otherPlayerIds)
         {
-            var result = saveResponse.Data.Results.Find(r => r.Key == saveKey);
-            gameData = System.Text.Json.JsonSerializer.Deserialize<ReflexGameData>(result.Value.ToString());
-        }
-        else
-        {
-            gameData = new ReflexGameData();
-        }
-        
-        // Store this player's result
-        if (string.IsNullOrEmpty(gameData.Player1Id))
-        {
-            gameData.Player1Id = context.PlayerId;
-            gameData.Player1Time = reactionTimeMs;
-        }
-        else if (gameData.Player1Id == context.PlayerId)
-        {
-            gameData.Player1Time = reactionTimeMs;
-        }
-        else
-        {
-            gameData.Player2Id = context.PlayerId;
-            gameData.Player2Time = reactionTimeMs;
-        }
-        
-        // Save updated game data
-        await gameApiClient.CloudSaveData.SetCustomItemAsync(
-            context, 
-            context.ServiceToken, 
-            context.ProjectId,
-            sessionId,
-            new SetItemBody(saveKey, System.Text.Json.JsonSerializer.Serialize(gameData))
-        );
-        
-        // Check if both players submitted
-        if (gameData.Player1Time > 0 && gameData.Player2Time > 0)
-        {
-            // Determine winner
-            string winner = "tie";
-            if (gameData.Player1Time < gameData.Player2Time)
-            {
-                winner = gameData.Player1Id == context.PlayerId ? "you" : "opponent";
-            }
-            else if (gameData.Player2Time < gameData.Player1Time)
-            {
-                winner = gameData.Player2Id == context.PlayerId ? "you" : "opponent";
-            }
-            
-            // Notify the other player
-            var pushClient = PushClient.Create();
-            string? otherPlayerId = context.PlayerId == gameData.Player1Id ? gameData.Player2Id : gameData.Player1Id;
-            string otherPlayerWinner = winner == "you" ? "opponent" : (winner == "opponent" ? "you" : "tie");
-            
-            int otherPlayerTime = (otherPlayerId == gameData.Player1Id ? gameData.Player1Time : gameData.Player2Time);
-            int currentPlayerTime = (context.PlayerId == gameData.Player1Id ? gameData.Player1Time : gameData.Player2Time);
-            
-            await pushClient.SendPlayerMessageAsync(
+            await _pushClient.SendPlayerMessageAsync(
                 context,
-                $"{{\"winner\":\"{otherPlayerWinner}\",\"yourTime\":{otherPlayerTime},\"opponentTime\":{currentPlayerTime},\"gameOver\":true}}",
-                messageType: "gameResult",
-                playerId: otherPlayerId
+                JsonConvert.SerializeObject(scoreData),
+                "reflexScoreUpdate",
+                playerId
             );
-            
-            return new ResultResponse
-            {
-                Winner = winner,
-                YourTime = reactionTimeMs,
-                OpponentTime = context.PlayerId == gameData.Player1Id ? gameData.Player2Time : gameData.Player1Time,
-                GameOver = true
-            };
         }
-
-        return new ResultResponse
-        {
-            Winner = "waiting",
-            YourTime = reactionTimeMs,
-            OpponentTime = 0,
-            GameOver = false
-        };
     }
 
-    #region PrivateMethods
-
-    private async Task UpdatePlayerUsername(IExecutionContext context, string username)
+    private Player CreatePlayerProfile(IExecutionContext context, string username)
     {
-        var gameApiClient = GameApiClient.Create();
-    
-        // Unity Cloud Save handles atomic operations PER PLAYER
-        // Each player's data is separate - no cross-player conflicts
-        await gameApiClient.CloudSaveData.SetCustomItemAsync(
-            context,
-            context.ServiceToken,
-            context.ProjectId,
-            context.PlayerId,  // Key = player's unique ID
-            new SetItemBody("username", username)
+        return new Player(
+            id: context.PlayerId!,
+            data: new Dictionary<string, PlayerDataObject>
+            {
+                {
+                    "username", new PlayerDataObject(
+                        value: username,
+                        visibility: PlayerDataObject.VisibilityEnum.Member
+                    )
+                }
+            }
         );
     }
-
-    private static async Task InitializeReflexGame(IExecutionContext context, string sessionId)
-    {
-        var gameApiClient = GameApiClient.Create();
-        var initialGameData = new ReflexGameData
-        {
-            Player1Id = "",
-            Player2Id = "",
-            Player1Time = 0,
-            Player2Time = 0
-        };
-    
-        await gameApiClient.CloudSaveData.SetCustomItemAsync(
-            context, context.ServiceToken, context.ProjectId, sessionId,
-            new SetItemBody("reflex_results", System.Text.Json.JsonSerializer.Serialize(initialGameData))
-        );
-    }
-
-    #endregion
-
 }
 
-public class HostGameResponse
+public class UgsResponse
 {
+    public string LobbyID { get; set; }
     public string LobbyCode { get; set; }
-}
-
-public class JoinGameResponse
-{
-    public string Session { get; set; }
-    public string OpponentId { get; set; }
-}
-
-public class QuickMatchResponse
-{
-    public string Session { get; set; }
-    public string OpponentId { get; set; }
-    public bool IsHost { get; set; }
-}
-
-
-public class ResultResponse
-{
-    public string Winner { get; set; }
-    public int YourTime { get; set; }
-    public int OpponentTime { get; set; }
-    public bool GameOver { get; set; }
-}
-
-public class ReflexGameData
-{
-    public string Player1Id { get; set; }
-    public string Player2Id { get; set; }
-    public int Player1Time { get; set; }
-    public int Player2Time { get; set; }
-}
-
-public class JoinGlobalLobbyResponse
-{
-    public string LobbyId { get; set; }
     public string LobbyName { get; set; }
-    public int PlayerCount { get; set; }
+    public bool IsHost { get; set;}
+    public int PlayerCount { get; set;}
     public bool Success { get; set; }
 }

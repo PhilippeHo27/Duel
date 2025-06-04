@@ -4,13 +4,17 @@ using System;
 
 namespace Unity.Services.CloudCode.GeneratedBindings.Duel
 {
-    public partial class JoinGameResponse
+    public partial class UgsResponse
     {
-        public string Session;
-        public string OpponentId;
+        public string LobbyID;
+        public string LobbyCode;
+        public string LobbyName;
+        public bool IsHost;
+        public int PlayerCount;
+        public bool Success;
 
         [Preserve]
-        public JoinGameResponse ()
+        public UgsResponse ()
         {
         }
     }

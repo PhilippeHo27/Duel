@@ -13,60 +13,63 @@ namespace Unity.Services.CloudCode.GeneratedBindings
             k_Service = service;
         }
 
-        public async Task<Duel.JoinGlobalLobbyResponse> JoinGlobalLobby(string username)
+        public async Task<Duel.UgsResponse> HostLobby(string gameType, string userName)
         {
-            return await k_Service.CallModuleEndpointAsync<Duel.JoinGlobalLobbyResponse>(
-                "Duel",
-                "JoinGlobalLobby",
-                new Dictionary<string, object>()
-                {
-                    {"username", username},
-                });
-        }
-
-        public async Task<Duel.HostGameResponse> HostLobby(string gameType)
-        {
-            return await k_Service.CallModuleEndpointAsync<Duel.HostGameResponse>(
+            return await k_Service.CallModuleEndpointAsync<Duel.UgsResponse>(
                 "Duel",
                 "HostLobby",
                 new Dictionary<string, object>()
                 {
                     {"gameType", gameType},
+                    {"userName", userName},
                 });
         }
 
-        public async Task<Duel.JoinGameResponse> JoinLobby(string lobbyCode, string gameType)
+        public async Task<Duel.UgsResponse> JoinLobby(string lobbyCode, string userName)
         {
-            return await k_Service.CallModuleEndpointAsync<Duel.JoinGameResponse>(
+            return await k_Service.CallModuleEndpointAsync<Duel.UgsResponse>(
                 "Duel",
                 "JoinLobby",
                 new Dictionary<string, object>()
                 {
                     {"lobbyCode", lobbyCode},
-                    {"gameType", gameType},
+                    {"userName", userName},
                 });
         }
 
-        public async Task<Duel.QuickMatchResponse> QuickMatch(string gameType)
+        public async Task<Duel.UgsResponse> LeaveLobby(string lobbyId)
         {
-            return await k_Service.CallModuleEndpointAsync<Duel.QuickMatchResponse>(
+            return await k_Service.CallModuleEndpointAsync<Duel.UgsResponse>(
+                "Duel",
+                "LeaveLobby",
+                new Dictionary<string, object>()
+                {
+                    {"lobbyId", lobbyId},
+                });
+        }
+
+        public async Task<Duel.UgsResponse> QuickMatch(string gameType, string userName)
+        {
+            return await k_Service.CallModuleEndpointAsync<Duel.UgsResponse>(
                 "Duel",
                 "QuickMatch",
                 new Dictionary<string, object>()
                 {
                     {"gameType", gameType},
+                    {"userName", userName},
                 });
         }
 
-        public async Task<Duel.ResultResponse> SubmitReflexResult(string sessionId, int reactionTimeMs)
+        public async Task SubmitReflexResult(string lobbyId, int reactionTimeMs, string playerName)
         {
-            return await k_Service.CallModuleEndpointAsync<Duel.ResultResponse>(
+            await k_Service.CallModuleEndpointAsync(
                 "Duel",
                 "SubmitReflexResult",
                 new Dictionary<string, object>()
                 {
-                    {"sessionId", sessionId},
+                    {"lobbyId", lobbyId},
                     {"reactionTimeMs", reactionTimeMs},
+                    {"playerName", playerName},
                 });
         }
     }

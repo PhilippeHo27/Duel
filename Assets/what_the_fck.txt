@@ -1,0 +1,116 @@
+
+=== 2025-06-03 01:39:49 ===
+{
+  "PlayerId": "FqYif61oTvgRpOjYbocBCXY1Oz9c",
+  "PlayerName": "RandomPlayer123",
+  "LobbyId": "xNwj9xWCPdWN8df4Hbovr9",
+  "LobbyName": "reflexGame initiated by Editor",
+  "LobbyCode": "T9WK97",
+  "MaxPlayers": 150,
+  "CurrentPlayerCount": 2,
+  "AvailableSlots": 148,
+  "IsPrivate": false,
+  "IsLocked": false,
+  "LobbyCreated": "2025-06-03T05:39:17.983Z",
+  "LobbyLastUpdated": "2025-06-03T05:39:44.106Z",
+  "HostId": "57gc1GdLbKMVF3iAXxJLYqPsjEKe",
+  "LobbyData": {
+    "S1": {
+      "Value": "reflex",
+      "Visibility": "Public"
+    }
+  },
+  "AllPlayersInLobby": [
+    {
+      "Id": "57gc1GdLbKMVF3iAXxJLYqPsjEKe",
+      "Username": "Editor",
+      "JoinedAt": "2025-06-03T05:39:17.983Z",
+      "IsConnected": false,
+      "PlayerData": {
+        "username": {
+          "Value": "Editor",
+          "Visibility": "Member"
+        }
+      }
+    },
+    {
+      "Id": "FqYif61oTvgRpOjYbocBCXY1Oz9c",
+      "Username": "RandomPlayer123",
+      "JoinedAt": "2025-06-03T05:39:44.106Z",
+      "IsConnected": false,
+      "PlayerData": {
+        "username": {
+          "Value": "RandomPlayer123",
+          "Visibility": "Member"
+        }
+      }
+    }
+  ],
+  "AccessToken": "eyJhbGciOiJSUzI1NiIs...",
+  "ProjectId": "cd668cdf-f8b9-4d78-bf6a-fed638bf06a3",
+  "EnvironmentId": "9a8e61b7-ccec-42ea-b6ce-7fe0c04f193a",
+  "EnvironmentName": "production",
+  "NotificationSentAt": "2025-06-03 05:39:44 UTC",
+  "GameType": "reflex",
+  "ServerRegion": "Unknown",
+  "GameVersion": "1.0.0",
+  "Platform": "Unknown"
+}
+
+=== 2025-06-03 01:49:52 ===
+{
+  "PlayerId": "FqYif61oTvgRpOjYbocBCXY1Oz9c",
+  "PlayerName": "RandomPlayer123",
+  "LobbyId": "eiMqddohL2tG64PsTWpSBK",
+  "LobbyName": "reflexGame initiated by Editor",
+  "LobbyCode": "8HWDHK",
+  "MaxPlayers": 150,
+  "CurrentPlayerCount": 2,
+  "AvailableSlots": 148,
+  "IsPrivate": false,
+  "IsLocked": false,
+  "LobbyCreated": "2025-06-03T05:49:42.482Z",
+  "LobbyLastUpdated": "2025-06-03T05:49:46.158Z",
+  "HostId": "57gc1GdLbKMVF3iAXxJLYqPsjEKe",
+  "LobbyData": {
+    "S1": {
+      "Value": "reflex",
+      "Visibility": "Public"
+    }
+  },
+  "AllPlayersInLobby": [
+    {
+      "Id": "57gc1GdLbKMVF3iAXxJLYqPsjEKe",
+      "Username": "Editor",
+      "JoinedAt": "2025-06-03T05:49:42.482Z",
+      "IsConnected": false,
+      "PlayerData": {
+        "username": {
+          "Value": "Editor",
+          "Visibility": "Member"
+        }
+      }
+    },
+    {
+      "Id": "FqYif61oTvgRpOjYbocBCXY1Oz9c",
+      "Username": "RandomPlayer123",
+      "JoinedAt": "2025-06-03T05:49:46.158Z",
+      "IsConnected": false,
+      "PlayerData": {
+        "username": {
+          "Value": "RandomPlayer123",
+          "Visibility": "Member"
+        }
+      }
+    }
+  ],
+  "AccessToken": "eyJhbGciOiJSUzI1NiIs...",
+  "ProjectId": "cd668cdf-f8b9-4d78-bf6a-fed638bf06a3",
+  "EnvironmentId": "9a8e61b7-ccec-42ea-b6ce-7fe0c04f193a",
+  "EnvironmentName": "production",
+  "NotificationSentAt": "2025-06-03 05:49:46 UTC",
+  "GameType": "reflex",
+  "ServerRegion": "Unknown",
+  "GameVersion": "1.0.0",
+  "Platform": "Unknown"
+}

@@ -2,14 +2,15 @@ using UnityEngine;
 using UnityEngine.UI;
 using System.Threading.Tasks;
 using TMPro;
+using DG.Tweening;
+using UnityEngine.Serialization;
 
 namespace Duel
 {
     public class HomeGUI : MonoBehaviour
     {
-        public Button joinGlobalLobbyButton;
+        [FormerlySerializedAs("joinGlobalLobbyButton")] public Button confirmNameButton;
         public TMP_InputField usernameField;
-        public TMP_Text confirmedJoinText;
         
         [Header("Minigame Buttons and Menu")]
         [SerializeField] private Button[] minigameButtons;
@@ -19,13 +20,20 @@ namespace Duel
         
         [Header("Minigame Overlay")]
         [SerializeField] private Button backButton;
+        [SerializeField] private Button miniGameMenuButton;
+        
         [Header("Lobby Buttons")]
         [SerializeField] private Button hostButton;
         [SerializeField] private Button joinButton;
+        [SerializeField] private Button copyButton;
         [SerializeField] private Button quickMatchButton;
         [SerializeField] private TMP_InputField lobbyCodeInputField;
-        [SerializeField] private TMP_Text searchingText;
-        private enum LobbyState { Default, Hosting, Searching }
+        [SerializeField] private TMP_Text outputText;
+        [SerializeField] private ScrollRect statusScrollRect;
+
+        private enum LobbyState { Default, Hosting, Joined, Searching }
+        private Sequence _loadingSequence;
+
 
         [Header("Canvas Groups")]
         [SerializeField] private CanvasGroup welcomeGroup;
@@ -37,32 +45,31 @@ namespace Duel
         void Start()
         {
             _allGroups = new[] { welcomeGroup, minigameGroup, minigameOverlay };
+            SwitchToState(welcomeGroup);
 
-            joinGlobalLobbyButton?.onClick.AddListener(() => OnJoinGlobalLobbyButtonClickAsync().ConfigureAwait(false));
-            
+            confirmNameButton?.onClick.AddListener(() => SwitchToState(minigameGroup));
+            miniGameMenuButton?.onClick.AddListener(() => ReturnToMinigameMenu().ConfigureAwait(false));
             hostButton?.onClick.AddListener(() => OnHostButtonClickAsync().ConfigureAwait(false));
             joinButton?.onClick.AddListener(() => OnJoinButtonClickAsync().ConfigureAwait(false));
             quickMatchButton?.onClick.AddListener(() => OnQuickMatchButtonClickAsync().ConfigureAwait(false));
             
             PopulateMinigameButtons();
             backButton?.onClick.AddListener(BackButton);
-        }
+            copyButton?.onClick.AddListener(() => GUIUtility.systemCopyBuffer = lobbyCodeInputField.text);
 
-        private async Task OnJoinGlobalLobbyButtonClickAsync()
+            
+            string savedUsername = PlayerPrefs.GetString("Username", "abc123");
+            usernameField.text = savedUsername;
+            usernameField.onEndEdit.AddListener(OnUsernameChanged);
+        }
+        
+        private void OnUsernameChanged(string newUsername)
         {
-            string username = usernameField?.text ?? "Player123";
-            
-            var response = await UnityGameServicesManager.Instance.JoinGlobalLobby(username);
-            if (response?.success == true)
+            if (!string.IsNullOrEmpty(newUsername))
             {
-                confirmedJoinText.text = $"Joined {response.lobbyName} as {username} ({response.playerCount} players)";
+                PlayerPrefs.SetString("Username", newUsername);
+                PlayerPrefs.Save();
             }
-            else
-            {
-                confirmedJoinText.text = "Failed to join global lobby";
-            }
-            
-            SwitchToState(minigameGroup);
         }
         
         private void PopulateMinigameButtons()
@@ -123,61 +130,102 @@ namespace Duel
             SceneLoader.Instance.UnloadAllAdditiveScenes();
         }
         
+        // private void ReturnToMinigameMenu()
+        // {
+        //     // Unload current additive scene if one is loaded
+        //     string currentScene = SceneLoader.Instance.CurrentAdditiveScene;
+        //     if (!string.IsNullOrEmpty(currentScene))
+        //     {
+        //         SceneLoader.Instance.UnloadAdditiveScene(currentScene, () => {
+        //             // After scene is unloaded, switch to minigame menu
+        //             SwitchToState(minigameGroup);
+        //         });
+        //     }
+        //     else
+        //     {
+        //         // No scene to unload, just switch to menu
+        //         SwitchToState(minigameGroup);
+        //     }
+        // }
+
+        private async Task ReturnToMinigameMenu()
+        {
+            // Always unload the current additive scene since this button only appears in minigames
+            string currentScene = SceneLoader.Instance.CurrentAdditiveScene;
+            
+            // Leave lobby if we're in one - using the singleton!
+            if (!string.IsNullOrEmpty(UnityGameServicesManager.Instance.LobbyID))
+            {
+                await UnityGameServicesManager.Instance.LeaveLobby(UnityGameServicesManager.Instance.LobbyID);
+            }
+
+    
+            SceneLoader.Instance.UnloadAdditiveScene(currentScene, () => {
+                // After scene is unloaded, reset everything and switch to minigame menu
+                SetLobbyState(LobbyState.Default);
+        
+                // Clear the lobby code input field
+                if (lobbyCodeInputField != null)
+                {
+                    lobbyCodeInputField.text = "";
+                    lobbyCodeInputField.readOnly = false;
+                }
+        
+                SwitchToState(minigameGroup);
+            });
+        }
+
+        
         private async Task OnHostButtonClickAsync()
         {
-            Debug.Log("Host button clicked");
-    
-            var response = await UnityGameServicesManager.Instance.HostLobby("reflex");
+            var response = await UnityGameServicesManager.Instance.HostLobby(SceneLoader.Instance.CurrentAdditiveScene);
             if (response != null)
             {
-                lobbyCodeInputField.text = response.lobbyCode;
-                DataManager.Instance.lobbyName = $"SESSION_{response.lobbyCode}";
+                Debug.Log(response.LobbyCode);
+                lobbyCodeInputField.text = response.LobbyCode;
                 SetLobbyState(LobbyState.Hosting);
+                UnityGameServicesManager.Instance.ReflexGameRef.Ready();
             }
         }
 
         private async Task OnJoinButtonClickAsync()
         {
-            Debug.Log("Join button clicked");
             string lobbyCode = lobbyCodeInputField?.text ?? "";
             if (string.IsNullOrEmpty(lobbyCode)) return;
 
-            var response = await UnityGameServicesManager.Instance.JoinLobby(lobbyCode, "reflex");
-            if (response?.session != null)
+            var response = await UnityGameServicesManager.Instance.JoinLobby(lobbyCode);
+            if (response?.Success == true)
             {
-                // confirmedJoinText.text = $"Joined lobby: {lobbyCode}";  // Add this if you have status text
-                DataManager.Instance.lobbyName = response.session;
-                // TODO: Set appropriate state after joining
+                SetLobbyState(LobbyState.Joined);
+                UnityGameServicesManager.Instance.ReflexGameRef.Ready();
             }
         }
         private async Task OnQuickMatchButtonClickAsync()
         {
-            Debug.Log("Quick match button clicked");
             SetLobbyState(LobbyState.Searching);
+
+            var response = await UnityGameServicesManager.Instance.QuickMatch(SceneLoader.Instance.CurrentAdditiveScene);
     
-            var response = await UnityGameServicesManager.Instance.QuickMatch("reflex");
-            if (response != null)
+            if (response?.Success == true)
             {
-                DataManager.Instance.lobbyName = response.session;
-        
-                if (response.isHost)
+                if (UnityGameServicesManager.Instance.IsHost)
                 {
-                    Debug.Log($"Created QuickMatch lobby: {response.session}, waiting for opponent");
-                    // Maybe show "Waiting for opponent..." UI
+                    Debug.Log($"Created QuickMatch lobby: {UnityGameServicesManager.Instance.LobbyID}");
+                    AddStatusMessage($"Created QuickMatch lobby: {UnityGameServicesManager.Instance.LobbyID}");
                 }
                 else
                 {
-                    Debug.Log($"Joined QuickMatch lobby: {response.session}, opponent: {response.opponentId}");
-                    // Both players connected, ready to start game
+                    Debug.Log($"Joined QuickMatch lobby: {UnityGameServicesManager.Instance.LobbyID}");
+                    AddStatusMessage($"Joined QuickMatch lobby: {UnityGameServicesManager.Instance.LobbyID}");
                 }
+                UnityGameServicesManager.Instance.ReflexGameRef.Ready();
             }
             else
             {
                 Debug.LogError("QuickMatch failed");
-                SetLobbyState(LobbyState.Default); // Reset UI on failure
+                SetLobbyState(LobbyState.Default);
             }
         }
-
 
         private void SetLobbyState(LobbyState state)
         {
@@ -188,28 +236,112 @@ namespace Duel
                     lobbyCodeInputField.gameObject.SetActive(true);
                     joinButton.gameObject.SetActive(true);
                     lobbyCodeInputField.readOnly = false;
-                    searchingText.gameObject.SetActive(false);
+                    copyButton.gameObject.SetActive(false);
                     break;
             
                 case LobbyState.Hosting:
                     hostButton.gameObject.SetActive(true);
                     lobbyCodeInputField.gameObject.SetActive(true);
+                    copyButton.gameObject.SetActive(true);
                     joinButton.gameObject.SetActive(false);
                     lobbyCodeInputField.readOnly = true;
+                    break;
+                
+                case LobbyState.Joined:
+                    hostButton.gameObject.SetActive(false);
+                    lobbyCodeInputField.gameObject.SetActive(false);
+                    copyButton.gameObject.SetActive(false);
+                    joinButton.gameObject.SetActive(false);
+                    lobbyCodeInputField.readOnly = true;
+                    //setactive something that says " joined "
                     break;
             
                 case LobbyState.Searching:
                     hostButton.gameObject.SetActive(false);
                     lobbyCodeInputField.gameObject.SetActive(false);
                     joinButton.gameObject.SetActive(false);
-                    searchingText.gameObject.SetActive(true);
+                    copyButton.gameObject.SetActive(false);
                     break;
             }
         }
         
+        public void AddStatusMessage(string message)
+        {
+            outputText.text += $"\n{message}";
+            Canvas.ForceUpdateCanvases();
+            statusScrollRect.verticalNormalizedPosition = 0f;
+        }
+        
+        public void SetQuickMatchButtonState(bool show)
+        {
+            quickMatchButton.interactable = show;
+        }
+
+        public void HideQuickMatchButton()
+        {
+            quickMatchButton.gameObject.SetActive(false);
+        }
+        
+        #region  Animations
+
+        public void UpdateStatusText(string message)
+        {
+            if (outputText != null)
+            {
+                AddStatusMessage(message);
+            }
+            else
+            {
+                Debug.LogWarning("Status text UI element is not assigned!");
+            }
+        }
+        
+        public void StartLoadingAnimation(string baseMessage)
+        {
+            StopLoadingAnimation();
+
+            string[] dots = { "", ".", "..", "..." };
+            _loadingSequence = DOTween.Sequence();
+
+            AddStatusMessage(baseMessage);
+    
+            for (int i = 0; i < dots.Length; i++)
+            {
+                int currentIndex = i;
+                _loadingSequence.AppendCallback(() => {
+                    UpdateLastStatusLine(baseMessage + dots[currentIndex]);
+                });
+                _loadingSequence.AppendInterval(0.5f);
+            }
+
+            _loadingSequence.SetLoops(-1);
+            _loadingSequence.Play();
+        }
+        
+        public void UpdateLastStatusLine(string message)
+        {
+            string[] lines = outputText.text.Split('\n');
+            if (lines.Length > 0)
+            {
+                lines[lines.Length - 1] = message;
+                outputText.text = string.Join("\n", lines);
+            }
+        }
+    
+        public void StopLoadingAnimation()
+        {
+            if (_loadingSequence != null)
+            {
+                _loadingSequence.Kill();
+                _loadingSequence = null;
+            }
+        }
+
+        #endregion
+
         private void OnDestroy()
         {
-            joinGlobalLobbyButton?.onClick.RemoveAllListeners();
+            confirmNameButton?.onClick.RemoveAllListeners();
         }
     }
 }

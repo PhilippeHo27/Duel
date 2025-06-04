@@ -6,14 +6,59 @@ using Unity.Services.Core;
 using Unity.Services.Authentication;
 using System.Collections.Generic;
 using Duel.Utilities;
+using Newtonsoft.Json;
+using Unity.Services.CloudCode.Subscriptions;
 
 namespace Duel
 {
     public class UnityGameServicesManager : IndestructibleSingletonBehaviour<UnityGameServicesManager>
     {
-        public string moduleName = "Duel";
-        public ReflexGameUGS ReflexGameUgs { get; set; }
+        [Header("References")]
+        [SerializeField] HomeGUI homeGUI;
+        [SerializeField] private ReflexGame reflexGameRef;
+
+        [Header("Lobby Data")]
+        [SerializeField] private string lobbyID;
+        [SerializeField] private string lobbyCodeRef;
+        [SerializeField] private string lobbyName;
+        [SerializeField] private bool isHost;
+        [SerializeField] private int playerCount;
+        [SerializeField] private bool isInLobby;
+        [SerializeField] private string moduleName = "Duel"; // this can be moved to some kind of global namespace const
+
+        public string ModuleName { get => moduleName; set => moduleName = value; }
+        public ReflexGame ReflexGameRef { get => reflexGameRef; set => reflexGameRef = value; }
+        public string LobbyID { get => lobbyID; set => lobbyID = value; }
+        public string LobbyCode { get => lobbyCodeRef; set => lobbyCodeRef = value; }
+        public string LobbyName { get => lobbyName; set => lobbyName = value; }
+        public bool IsHost { get => isHost; set => isHost = value; }
+        public int PlayerCount { get => playerCount; set => playerCount = value; }
+        public bool IsInLobby { get => isInLobby; set => isInLobby = value; }
+        private void SetLobbyData(UgsResponse response)
+        {
+            if (response != null && response.Success)
+            {
+                lobbyID = response.LobbyID;
+                lobbyCodeRef = response.LobbyCode;
+                lobbyName = response.LobbyName;
+                isHost = response.IsHost;
+                playerCount = response.PlayerCount;
+                isInLobby = true;
+            }
+        }
+
+        public void ClearLobbyData()
+        {
+            lobbyID = null;
+            lobbyCodeRef = null;
+            lobbyName = null;
+            isHost = false;
+            playerCount = 0;
+            isInLobby = false;
+        }
         
+        private ISubscriptionEvents _playerSubscription;
+
         void Start()
         {
             InitializeServicesAsync().ConfigureAwait(false);
@@ -25,157 +70,252 @@ namespace Duel
             {
                 await UnityServices.InitializeAsync();
                 await AuthenticationService.Instance.SignInAnonymouslyAsync();
-                Debug.Log("Unity Services Initialized and Signed In Anonymously.");
+                homeGUI?.AddStatusMessage("Unity Services Initialized");
             }
             catch (Exception ex)
             {
+                homeGUI?.AddStatusMessage($"Auth failed: {ex.Message}");
                 Debug.LogError($"Failed to initialize Unity Services: {ex.Message}");
             }
         }
         
-        public async Task<JoinGlobalLobbyResponse> JoinGlobalLobby(string username)
+
+        private async Task SubscribeToPlayerMessages()
         {
-            Debug.Log($"Attempting to call {moduleName}/JoinGlobalLobby with username: {username}");
-            try
+            if (_playerSubscription != null)
             {
-                var result = await CloudCodeService.Instance.CallModuleEndpointAsync<JoinGlobalLobbyResponse>(
-                    moduleName,
-                    "JoinGlobalLobby",
-                    new Dictionary<string, object> { { "username", username } }
-                );
-                Debug.Log($"Joined global lobby: {result.lobbyName} with {result.playerCount} players");
-                return result;
+                await _playerSubscription.UnsubscribeAsync();
             }
-            catch (CloudCodeException e)
+            
+            var callbacks = new SubscriptionEventCallbacks();
+            callbacks.MessageReceived += @event =>
             {
-                Debug.LogError($"Failed to join global lobby (CloudCodeException): {e.Message} | Error Code: {e.ErrorCode} | Reason: {e.Reason}");
-                Debug.LogError($"Details: {e.ToString()}");
-                return null;
-            }
-            catch (Exception e)
+                switch (@event.MessageType)
+                {
+                    case "playerJoined":
+                        var matchData = JsonConvert.DeserializeObject(@event.Message);
+                        OnMatchFound(matchData);
+                        break;
+                    case "reflexScoreUpdate":
+                        var reflexData = JsonConvert.DeserializeObject(@event.Message);
+                        if (reflexGameRef != null) reflexGameRef.OnOpponentScoreReceived(reflexData);
+                        break;
+                    default:
+                        Debug.Log($"Got unsupported player message: {@event.MessageType}");
+                        break;
+                }
+            };
+
+            callbacks.ConnectionStateChanged += @event =>
             {
-                Debug.LogError($"Failed to join global lobby (System.Exception): {e.Message}");
-                Debug.LogError($"Details: {e.ToString()}");
-                return null;
-            }
+                Debug.Log($"Player subscription state changed: {@event}");
+            };
+
+            callbacks.Error += @event =>
+            {
+                Debug.LogError($"Player subscription error: {JsonConvert.SerializeObject(@event)}");
+            };
+
+            _playerSubscription = await CloudCodeService.Instance.SubscribeToPlayerMessagesAsync(callbacks);
         }
         
-        public async Task<HostGameResponse> HostLobby(string gameType)
+        public async Task<UgsResponse> HostLobby(string gameType)
         {
-            Debug.Log($"Attempting to call {moduleName}/HostLobby with gameType: {gameType}");
+            Debug.Log($"Attempting to host lobby for {gameType}");
             try
             {
-                var result = await CloudCodeService.Instance.CallModuleEndpointAsync<HostGameResponse>(
-                    moduleName,
+                var result = await CloudCodeService.Instance.CallModuleEndpointAsync<UgsResponse>(
+                    ModuleName,
                     "HostLobby",
-                    new Dictionary<string, object> { { "gameType", gameType } }
+                    new Dictionary<string, object> { 
+                        { "gameType", gameType },
+                        { "username", PlayerPrefs.GetString("Username") }
+                    }
                 );
-                Debug.Log($"Hosted real Unity lobby with code: {result.lobbyCode}");
+
+                SetLobbyData(result);
+                await SubscribeToPlayerMessages();
                 return result;
             }
             catch (CloudCodeException e)
             {
                 Debug.LogError($"Failed to host lobby (CloudCodeException): {e.Message} | Error Code: {e.ErrorCode} | Reason: {e.Reason}");
-                Debug.LogError($"Details: {e.ToString()}");
+                Debug.LogError($"Details: {e}");
                 return null;
             }
             catch (Exception e)
             {
                 Debug.LogError($"Failed to host lobby (System.Exception): {e.Message}");
-                Debug.LogError($"Details: {e.ToString()}");
+                Debug.LogError($"Details: {e}");
                 return null;
             }
         }
 
-        public async Task<JoinGameResponse> JoinLobby(string lobbyCode, string gameType)
+
+        public async Task<UgsResponse> JoinLobby(string lobbyCode)
         {
-            Debug.Log($"Attempting to call {moduleName}/JoinLobby with lobbyCode: {lobbyCode}, gameType: {gameType}");
             try
             {
-                var result = await CloudCodeService.Instance.CallModuleEndpointAsync<JoinGameResponse>(
-                    moduleName,
+                var result = await CloudCodeService.Instance.CallModuleEndpointAsync<UgsResponse>(
+                    ModuleName,
                     "JoinLobby",
                     new Dictionary<string, object> 
                     { 
                         { "lobbyCode", lobbyCode },
-                        { "gameType", gameType }
+                        { "userName", PlayerPrefs.GetString("Username" )}
                     }
                 );
-                Debug.Log($"Joined real Unity lobby: {result.session}");
+                
+                SetLobbyData(result);
+                await SubscribeToPlayerMessages();
                 return result;
             }
             catch (CloudCodeException e)
             {
                 Debug.LogError($"Failed to join lobby (CloudCodeException): {e.Message} | Error Code: {e.ErrorCode} | Reason: {e.Reason}");
-                Debug.LogError($"Details: {e.ToString()}");
-                return null;
-            }
-            catch (System.Exception e)
-            {
-                Debug.LogError($"Failed to join lobby (System.Exception): {e.Message}");
-                Debug.LogError($"Details: {e.ToString()}");
-                return null;
-            }
-        }
-
-        
-        public async Task<QuickMatchResponse> QuickMatch(string gameType)
-        {
-            Debug.Log($"Attempting to call {moduleName}/QuickMatch with gameType: {gameType}");
-            try
-            {
-                var result = await CloudCodeService.Instance.CallModuleEndpointAsync<QuickMatchResponse>(
-                    moduleName,
-                    "QuickMatch",
-                    new Dictionary<string, object> { { "gameType", gameType } }
-                );
-                Debug.Log($"QuickMatch result - Session: {result.session}, OpponentId: {result.opponentId}, IsHost: {result.isHost}");
-                return result;
-            }
-            catch (CloudCodeException e)
-            {
-                Debug.LogError($"Failed QuickMatch (CloudCodeException): {e.Message} | Error Code: {e.ErrorCode} | Reason: {e.Reason}");
-                Debug.LogError($"Details: {e.ToString()}");
+                Debug.LogError($"Details: {e}");
                 return null;
             }
             catch (Exception e)
             {
-                Debug.LogError($"Failed QuickMatch (System.Exception): {e.Message}");
-                Debug.LogError($"Details: {e.ToString()}");
+                Debug.LogError($"Failed to join lobby (System.Exception): {e.Message}");
+                Debug.LogError($"Details: {e}");
                 return null;
             }
         }
-
-
-
-        [Serializable]
-        public class JoinGlobalLobbyResponse
+        
+        public async Task<UgsResponse> LeaveLobby(string lobbyId)
         {
-            public string lobbyId;
-            public string lobbyName;
-            public int playerCount;
-            public bool success;
-        }
-
-        [Serializable]
-        public class HostGameResponse
-        {
-            public string lobbyCode;
-        }
-
-        [Serializable]
-        public class JoinGameResponse
-        {
-            public string session;
-            public string opponentId;
+            try
+            {
+                var result = await CloudCodeService.Instance.CallModuleEndpointAsync<UgsResponse>(
+                    ModuleName,
+                    "LeaveLobby",
+                    new Dictionary<string, object> 
+                    { 
+                        { "lobbyId", lobbyId }
+                    }
+                );
+                
+                ClearLobbyData();
+                return result;
+            }
+            catch (CloudCodeException e)
+            {
+                Debug.LogError($"Failed to leave lobby (CloudCodeException): {e.Message} | Error Code: {e.ErrorCode} | Reason: {e.Reason}");
+                Debug.LogError($"Details: {e}");
+                return null;
+            }
+            catch (Exception e)
+            {
+                Debug.LogError($"Failed to leave lobby (System.Exception): {e.Message}");
+                Debug.LogError($"Details: {e}");
+                return null;
+            }
         }
         
-        [Serializable]
-        public class QuickMatchResponse
+        public async Task<UgsResponse> QuickMatch(string gameType, int timeoutSeconds = 30)
         {
-            public string session;
-            public string opponentId;
-            public bool isHost;
+            homeGUI?.StartLoadingAnimation("Searching opponent");
+            homeGUI?.SetQuickMatchButtonState(false);
+            
+            try
+            {
+                // Create timeout task
+                var timeoutTask = Task.Delay(TimeSpan.FromSeconds(timeoutSeconds));
+                var quickMatchTask = CloudCodeService.Instance.CallModuleEndpointAsync<UgsResponse>(
+                    ModuleName,
+                    "QuickMatch",
+                    new Dictionary<string, object> { 
+                        { "gameType", gameType },
+                        { "username", PlayerPrefs.GetString("Username") }
+                    }
+                );
+
+                // Wait for either completion or timeout
+                var completedTask = await Task.WhenAny(quickMatchTask, timeoutTask);
+
+                if (completedTask == timeoutTask)
+                {
+                    homeGUI?.StopLoadingAnimation();
+                    homeGUI?.UpdateLastStatusLine("Search timed out");
+                    homeGUI?.SetQuickMatchButtonState(true);
+                    return null;
+                }
+
+                // Get the result
+                var result = await quickMatchTask;
+                
+                SetLobbyData(result);
+                await SubscribeToPlayerMessages();
+
+                if (result.IsHost)
+                {
+                    // Host waits for opponent - subscribe to notifications
+                    homeGUI?.StopLoadingAnimation();
+                    homeGUI?.UpdateLastStatusLine("Waiting for opponent...");
+                }
+                else
+                {
+                    // Joiner found match immediately
+                    homeGUI?.StopLoadingAnimation();
+                    homeGUI?.UpdateLastStatusLine("Found match!");
+                    homeGUI?.HideQuickMatchButton();
+                    StartGame(result);
+                }
+
+                return result;
+            }
+            catch (CloudCodeException e)
+            {
+                homeGUI?.StopLoadingAnimation();
+                homeGUI?.UpdateLastStatusLine("Search failed");
+                homeGUI?.SetQuickMatchButtonState(true);
+                Debug.LogError($"Failed QuickMatch (CloudCodeException): {e.Message}");
+                return null;
+            }
+            catch (Exception e)
+            {
+                homeGUI?.StopLoadingAnimation();
+                homeGUI?.UpdateLastStatusLine("Search failed");
+                homeGUI?.SetQuickMatchButtonState(true);
+                Debug.LogError($"Failed QuickMatch (Exception): {e.Message}");
+                return null;
+            }
         }
+        
+        private void OnMatchFound(object matchDataObj)
+        {
+            homeGUI?.StopLoadingAnimation();
+            homeGUI?.UpdateLastStatusLine("Match found!");
+            homeGUI?.HideQuickMatchButton();
+
+            // Cast to JObject to access the data
+            var matchData = (Newtonsoft.Json.Linq.JObject)matchDataObj;
+    
+            // Debug line to print everything in matchData:
+            Debug.Log($"Full matchData content: {matchData}");
+    
+            // Or access individual properties:
+            Debug.Log($"PlayerId: {matchData["PlayerId"]}");
+            Debug.Log($"PlayerName: {matchData["PlayerName"]}");
+            Debug.Log($"GameType: {matchData["GameType"]}");
+        }
+
+
+        private void StartGame(UgsResponse response)
+        {
+
+        }
+    }
+    
+    public class UgsResponse
+    {
+        public string LobbyID { get; set; }
+        public string LobbyCode { get; set; }
+        public string LobbyName { get; set; }
+        public bool IsHost { get; set;}
+        public int PlayerCount { get; set;}
+        public bool Success { get; set; }
     }
 }
