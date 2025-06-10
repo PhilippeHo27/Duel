@@ -3,6 +3,7 @@
 [Tt]emp/
 [Oo]bj/
 [Bb]uild/
+!WebGLBuild/Build/
 [Bb]uilds/
 [Ll]ogs/
 [Uu]ser[Ss]ettings/
