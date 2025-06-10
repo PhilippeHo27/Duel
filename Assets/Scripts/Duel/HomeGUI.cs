@@ -14,7 +14,7 @@ namespace Duel
         
         [Header("Minigame Buttons and Menu")]
         [SerializeField] private Button[] minigameButtons;
-        [SerializeField] private MinigameList minigameList;
+        //[SerializeField] private MinigameList minigameList;
         [SerializeField] private GameObject minigameButtonPrefab; 
         [SerializeField] private Transform minigameGrid;
         
@@ -33,8 +33,7 @@ namespace Duel
 
         private enum LobbyState { Default, Hosting, Joined, Searching }
         private Sequence _loadingSequence;
-
-
+        
         [Header("Canvas Groups")]
         [SerializeField] private CanvasGroup welcomeGroup;
         [SerializeField] private CanvasGroup minigameGroup;
@@ -75,12 +74,12 @@ namespace Duel
         private void PopulateMinigameButtons()
         {
             // Create buttons for each minigame
-            for (int i = 0; i < minigameList.miniGames.Length; i++)
+            for (int i = 0; i < SceneLoader.Instance.MinigameList.miniGames.Length; i++)
             {
                 GameObject buttonObj = Instantiate(minigameButtonPrefab, minigameGrid);
                 Button button = buttonObj.GetComponent<Button>();
         
-                string sceneName = minigameList.miniGames[i].sceneName;
+                string sceneName = SceneLoader.Instance.MinigameList.miniGames[i].sceneName;
         
                 // Set button text
                 TMP_Text buttonText = button.GetComponentInChildren<TMP_Text>();

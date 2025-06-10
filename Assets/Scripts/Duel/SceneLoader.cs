@@ -10,7 +10,10 @@ namespace Duel
     public class SceneLoader : IndestructibleSingletonBehaviour<SceneLoader>
     {
         [SerializeField] private bool debugLogging = true;
+        [SerializeField] private MinigameList minigameList;
+
         private string _currentAdditiveScene = "";
+        public MinigameList MinigameList { get => minigameList; set => minigameList = value; }
         public string CurrentAdditiveScene { get => _currentAdditiveScene; set => _currentAdditiveScene = value; }
 
         private readonly Dictionary<string, AsyncOperation> _activeOperations = new Dictionary<string, AsyncOperation>();
