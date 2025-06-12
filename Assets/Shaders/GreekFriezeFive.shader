@@ -33,6 +33,7 @@ Shader "Custom/GreekFriezeFive"
                 float4 vertex : SV_POSITION;
                 float3 worldPos : TEXCOORD1;
                 float4 screenPos : TEXCOORD2;
+                float4 screenUV : TEXCOORD3;
             };
             
             sampler2D _MainTex;
@@ -40,7 +41,6 @@ Shader "Custom/GreekFriezeFive"
             float _AnimationSpeed;
             float4 _Offset;
             
-            // Helper functions from original HLSL
             float2 vec2_ctor(float x0, float x1)
             {
                 return float2(x0, x1);
@@ -69,17 +69,15 @@ Shader "Custom/GreekFriezeFive"
                 o.uv = TRANSFORM_TEX(v.uv, _MainTex);
                 o.worldPos = mul(unity_ObjectToWorld, v.vertex).xyz;
                 o.screenPos = ComputeScreenPos(o.vertex);
+                o.screenUV = ComputeScreenPos(o.vertex);
                 return o;
             }
             
-            // Main image function converted from original
             void mainImage(inout float4 fragColor, in float2 fragCoord)
             {
-                // Get screen resolution and time - using the properties now
                 float3 iResolution = float3(_ScreenParams.xy, 1.0);
                 float iTime = _Time.y * _AnimationSpeed;
                 
-                // Apply offset to fragment coordinates (like in SpaceGif)
                 fragCoord += _Offset.xy;
                 
                 float4 _O = float4(0, 0, 0, 0);
@@ -88,28 +86,34 @@ Shader "Custom/GreekFriezeFive"
                 float2 _R3042 = iResolution.xy;
                 float2 _V3043 = float2(0, 0);
                 
-                _U = ((5.0 * ((_U + _U) - _R3042)) / _R3042.y);
+                float2 originalU = ((5.0 * ((_U + _U) - _R3042)) / _R3042.y);
+                float2 dUdx = ddx(originalU);
+                float2 dUdy = ddy(originalU);
+                float derivMagnitude = max(length(abs(dUdx) + abs(dUdy)), 0.0001);
+                
+                _U = originalU;
                 _U = vec2_ctor(((atan_emu(_U.y, _U.x) / 6.28299999) + 0.5), length(_U));
+                _U.x = fmod(_U.x + 1.0, 1.0);
                 _U.y -= _U.x;
                 _U.x = (((2.5999999 * (ceil(_U.y) + _U.x)) * (ceil(_U.y) + _U.x)) - iTime);
                 _O = vec4_ctor((1.0 - pow(abs(((2.0 * frac(_U.y)) - 1.0)), 10.0)));
                 _V3043 = ceil(_U);
                 _U = (frac(_U) - 0.5);
                 _U.y = dot(_U, cos((float2(-33.0, 0.0) + ((0.300000012 * (iTime + _V3043.x)) * max(0.0, (0.5 - length(_U)))))));
-                _O *= smoothstep(-1.0, 1.0, (_U / fwidth(_U))).y;
+                _O *= smoothstep(-1.0, 1.0, (_U.y / derivMagnitude));
                 
                 fragColor = _O;
             }
             
             fixed4 frag (v2f i) : SV_Target
             {
-                // Convert screen position back to fragment coordinates (same as SpaceGif)
-                float2 fragCoord = i.screenPos.xy / i.screenPos.w * _ScreenParams.xy;
+                float2 pixelCoord = i.screenUV.xy / i.screenUV.w;
+                float2 fragCoord = pixelCoord * _ScreenParams.xy;
+                fragCoord = floor(fragCoord) + 0.5;
                 
                 float4 col = float4(1, 1, 1, 1);
                 mainImage(col, fragCoord);
                 
-                // Error visualization from original (optional - can be removed)
                 if (col.x < 0.0)
                     col = float4(1.0, 0.0, 0.0, 1.0);
                 if (col.y < 0.0)

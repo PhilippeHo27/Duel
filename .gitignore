@@ -3,10 +3,11 @@
 [Tt]emp/
 [Oo]bj/
 [Bb]uild/
-!WebGLBuild/Build/
+!BuildWebGL/Build/
 [Bb]uilds/
 [Ll]ogs/
 [Uu]ser[Ss]ettings/
+
 
 # Unity Asset Store Tools
 /[Aa]ssets/AssetStoreTools*
